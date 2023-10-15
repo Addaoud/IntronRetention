@@ -10,11 +10,8 @@ from typing import List
 def train_loop(
     device, model, dataloader, loss_fn, optimizer, n_accumulated_batches: int
 ) -> float:
-    """Executes a single epoch of training.
-    :param device:
-        device where to train the model, e.g. "cpu" or "cuda"
-    :param model:
-
+    """
+    Executes a single epoch of training.
     """
     model.train()
     loss_per_epoch = 0
@@ -143,7 +140,7 @@ def train_model(
     )
     torch.save(model, model_path)
     plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
-    return model
+    return model_path
 
 def onehot_encode_labels(labels_list: List[int], num_labels: int):
     """

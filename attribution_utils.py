@@ -5,11 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 import seaborn as sns
+from operator import and_
+from fastprogress import progress_bar
 from captum.attr import IntegratedGradients
 sns.set()
 
 class IGDataset(Dataset):
-    def __init__(self, df_path,fa_file,relevant_targets):
+    def __init__(self, df_path,fa_file,sampler,relevant_targets):
         self.DNAalphabet = {'A':'0', 'C':'1', 'G':'2', 'T':'3'}
         df_path = df_path.split('.')[0] #just in case the user provide extension
         self.df_all = pd.read_csv(df_path+'.txt',delimiter='\t',header=None)
@@ -27,6 +29,7 @@ class IGDataset(Dataset):
         self.df_final = pd.merge(self.df_seq_all[['header',"sequence"]],self.df_all[['header','label']],on='header',how='inner')
         self.df_final.drop_duplicates(inplace=True)
         
+        self.df_final = self.df_final.iloc[sampler,:]
         self.df_final = self.df_final.loc[self.df_final.label.isin(relevant_targets)]
         self.df_final = self.df_final.reset_index()
         self.One_hot_Encoded_Tensors = []
@@ -75,44 +78,48 @@ def plot_filter_heat(param_matrix, file_path: str):
     plt.close()
 
 def extract_seq(model,data_loader,window_size,IG_threshhold,relevant_target,device):
+    sequences = []
+    IGs = []
+    Scores = []
+    n_unique_sequences = 0
     with torch.no_grad():
         model.eval()
-        seqs = []
-        IGs = []
-        Scores = []
         integrated_gradients = IntegratedGradients(model)
-        for batch_idx, (seq , data, target) in enumerate(data_loader):
-            print(f"processed {batch_idx} out of {len(data_loader)} batches")
-            data = data.to(device)
-            attributions_ig = integrated_gradients.attribute(data, target=relevant_target, n_steps=20)
-            attributions_ig = attributions_ig.cpu().detach().numpy()
-            for n in range (attributions_ig.shape[0]):
-                for bps in list(
-                    motif_indices(
-                        attributions_ig[n, :, :],
-                        IG_window_size=window_size,
-                        IG_threshhold=IG_threshhold,
-                    )
-                ):
-                    start_pos = bps[0]
-                    end_pos = start_pos + window_size
-                    score = bps[1]
-                    seqs.append(seq[n][start_pos:end_pos])
-                    IGs.append(attributions_ig[n, :, start_pos:end_pos])
-                    Scores.append(score)
-            if batch_idx == 50:
-                break
-    return (seqs,IGs,Scores)
+        for batch_idx, (seqs, data, target) in enumerate(progress_bar(data_loader)):
+            data = data.to(device,dtype=torch.float)
+            outputs = model(data)
+            softmax = torch.nn.Softmax(dim=1)
+            pred=softmax(outputs).detach().cpu()
+            prediction_score, pred_label_idx = torch.topk(pred,k=1)
+            thresh_indices = torch.gt(prediction_score,0.8).squeeze()
+            label_indices = pred_label_idx.squeeze()==target
+            indices = and_(thresh_indices,label_indices)
+            if sum(indices)!=0:
+                n_unique_sequences += sum(indices)
+                attributions_ig = integrated_gradients.attribute(data[indices], target=relevant_target, n_steps=20)
+                attributions_ig = attributions_ig.cpu().detach().numpy()
+                seqs = np.array(seqs)[indices]
+                for n in range (attributions_ig.shape[0]):
+                    for bps in list(
+                        motif_indices(
+                            attributions_ig[n,:,:],
+                            IG_window_size=window_size,
+                            IG_threshhold=IG_threshhold,
+                        )
+                    ):
+                        start_pos = bps[0]
+                        end_pos = start_pos + window_size
+                        score = bps[1]
+                        sequences.append(seqs[n][start_pos:end_pos])
+                        IGs.append(attributions_ig[n, :, start_pos:end_pos])
+                        Scores.append(score)
+    return (sequences,IGs,Scores,n_unique_sequences)
 
-def mat_product(mat1,mat2,threshold=0.7):
-    assert (mat1.shape[1]<mat2.shape[1]), 'arg1 should be the smaller matrix'
-    n = mat1.shape[1]
-    for i in range (mat2.shape[1]-n):
-        pr = np.multiply(mat1,mat2[:,i:i+n])
-        pr /= mat1.max(axis=0)
-        c = all([v.sum()>0 for v in pr.transpose()])
-        pr = pr.sum() / mat1.shape[1]
-        if pr>threshold and c:
+def mat_product(motif,hotencoded_DNAsequence,threshold=0.7):
+    n = motif.shape[1]
+    for i in range (hotencoded_DNAsequence.shape[1]-n+1):
+        score = np.multiply(motif,hotencoded_DNAsequence[:,i:i+n]).sum()
+        if score>threshold:
             return True
     return False
 

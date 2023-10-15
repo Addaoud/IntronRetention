@@ -1,0 +1,26 @@
+{
+    "paths": {
+      "train_data": "/data/",
+      "train_target": "/data/",
+      "valid_data": "/data/",
+      "valid_target": "/data/",
+      "test_data": "/data/",      
+      "test_target": "/data/",
+      "results_path": "results",
+      "relevant_targets": "TFs"
+    },
+    "optimizer_params": {
+      "optimizer": "adamw",
+      "learning_rate": 0.001,
+      "weight_decay": 1e-05
+    },
+    "train_params": {
+      "lazy_loading": true,
+      "imbalanced_data": false,
+      "max_epochs": 3000,
+      "batch_size": 100,
+      "counter_for_early_stop": 30,
+      "epochs_to_check_loss": 10,
+      "batch_accumulation": false
+    }
+}
