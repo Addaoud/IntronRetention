@@ -1,7 +1,11 @@
-data
+data/data.fa.clstr
 LR.ipynb
 LGBM.ipynb
 Basset.ipynb
 fine_tuned_SEI.ipynb
 Prepare numpy data.ipynb
 VirtualEnv
+__pycache__
+.vscode
+Sei.pth
+target.names
