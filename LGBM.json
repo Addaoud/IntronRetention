@@ -1,0 +1,17 @@
+{
+    "paths": {
+      "train_data": "/data/data_TFs_train.npy",
+      "train_target": "/data/target_TF_train.npy",
+      "valid_data": "/data/data_TFs_valid.npy",
+      "valid_target": "/data/target_TF_valid.npy",
+      "test_data": "/data/data_TFs_test.npy",      
+      "test_target": "/data/target_TF_test.npy",
+      "results_path": "results/results_LGBM/only_TFs"
+    },
+    "train_params": {
+      "n_estimators": 1000,
+      "n_iters": 1500,
+      "early_stopping_round": 50,
+      "imbalanced_data": true
+    }
+}

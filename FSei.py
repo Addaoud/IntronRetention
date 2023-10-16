@@ -5,19 +5,17 @@ import seaborn as sns
 sns.set()
 import torch
 from src.utils import create_path, save_model_log, save_data_to_csv, generate_UDir, split_targets, read_json
-from src.dataset_utils import dataLR
 from src.train_utils import train_model, evaluate_model
-from src.results_utils import plot_distribution
-from src.networks import LogisticRegression
-
+from src.dataset_utils import load_datasets
+from src.networks import generate_FSei
 
 def parse_arguments(parser):
     parser.add_argument("--json", type=str, help="path to the json file")
     parser.add_argument(
         "-n",
         "--new",
-        action="store_false",
-        help="Build a new logistic regression model",
+        action="store_true",
+        help="Build a new model",
     )
     parser.add_argument(
         "-m", "--model_path", type=str, help="Existing model path"
@@ -47,12 +45,14 @@ if __name__ == "__main__":
     Chromatin_access_indices
     ) = split_targets(targets_file_pth = 'target.names')
     
-    train_loader,valid_loader,test_loader,input_dim,output_dim = dataLR(config=config)
+    batch_size = args.train_params.get('batch_size')
+    lazy_loading = args.train_params.get('lazy_loading')
+    train_loader,valid_loader,test_loader = load_datasets(batchSize=batch_size, test_split=0.1, output_dir='data', lazyLoad=lazy_loading)
 
     if args.new:
-        model = LogisticRegression(input_dim,output_dim).to(device)
-        Udir = generate_UDir(path=config.results_paths.get('results_path'))
-        model_folder_path = os.path.join(config.results_paths.get('results_path'),Udir)
+        model = generate_FSei(new_model = True, use_pretrain = True, freeze_weights = False).to(device)
+        Udir = generate_UDir(path=args.results_paths.get('results_path'))
+        model_folder_path = os.path.join(args.results_paths.get('results_path'),Udir)
         create_path(model_folder_path)
     else:
         model_folder_path = os.path.dirname(args.model_path)
@@ -75,22 +75,16 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
     #Prepare the loss function
-    if output_dim == 1:
-        loss_function = torch.nn.BCEWithLogitsLoss()
-        activation_function = torch.nn.Sigmoid(dim=1) 
-    else:
-        loss_function = torch.nn.CrossEntropyLoss()
-        activation_function = torch.nn.Softmax(dim=1)
-        
+    loss_function = torch.nn.CrossEntropyLoss(reduction='mean')
+    activation_function = torch.nn.Softmax(dim=1)
+  
     #Train params
-    max_epochs = config.train_params.get('max_epochs')
-    counter_for_early_stop = config.train_params.get('counter_for_early_stop')
-    epochs_to_check_loss = config.train_params.get('epochs_to_check_loss')
-    batch_accumulation = config.train_params.get('batch_accumulation')
-    imbalanced_data = config.train_params.get('imbalanced_data')
+    max_epochs = args.train_params.get('max_epochs')
+    counter_for_early_stop = args.train_params.get('counter_for_early_stop')
+    epochs_to_check_loss = args.train_params.get('epochs_to_check_loss')
+    batch_accumulation = args.train_params.get('batch_accumulation')
     #Save train params in log file
     save_model_log(log_dir = model_folder_path, data_dictionary = {'batch_accumulation': batch_accumulation,
-                                                                   'Imbalanced data': imbalanced_data,
                                                                    'learning_rate': learning_rate,
                                                                    'counter_for_early_stop': counter_for_early_stop,
                                                                    'epochs_to_check_loss': epochs_to_check_loss})
@@ -112,17 +106,5 @@ if __name__ == "__main__":
 
     accuracy, auroc, auprc = evaluate_model(model = model, dataloader = test_loader, activation_function = activation_function, device = device)
     data_dict = {'path':model_path,'accuracy':accuracy,'auroc':auroc,'auprc':auprc}
-    results_csv_path = os.path.join(config.results_paths.get('results_path'),'results.csv')
+    results_csv_path = os.path.join(args.results_paths.get('results_path'),'results.csv')
     save_data_to_csv(data_dictionary = data_dict, csv_file_path = results_csv_path)
-
-    weights = list(model.parameters())[0].cpu().detach().numpy()[0]
-    #Save weights distribution
-    plot_distribution(weights=weights, file_path=os.path.join(model_folder_path,'Distribution.png'))
-
-    #Save feature weights in a csv file
-    for target_list in [Sei_targets_list,TFs_list,Histone_marks_list]:
-        if len(target_list) == input_dim:
-            break
-    importance_csv_file = os.path.join(model_folder_path,'Importance_df.csv')
-    df = pd.DataFrame({'Target':target_list,'Weights':weights}).sort_values(by='Weights',ascending=False)
-    df.to_csv(importance_csv_file)

@@ -1,3 +1,4 @@
+from typing import Optional
 import os
 import numpy as np
 import pandas as pd
@@ -96,11 +97,6 @@ class DatasetLoad(Dataset):
     def get_all_data(self):
         return self.df_final
     
-    def one_hot_encode(self,seq):
-        mapping = dict(zip("ACGT", range(4)))    
-        seq2 = [mapping[i] for i in seq]
-        return np.eye(4)[seq2].T.astype(np.long)
-    
     def __getitem__(self, idx):
         if not self.lazyLoad:
             return self.One_hot_Encoded_Tensors[idx],self.Label_Tensors[idx].long()
@@ -108,13 +104,13 @@ class DatasetLoad(Dataset):
             return torch.tensor(hot_encode_sequence(self.df_final['sequence'][idx])),self.Label_Tensors[idx].long()
 
 
-def load_datasets(batchSize: int, test_split: float, output_dir: str):
+def load_datasets(batchSize: int, test_split: float, output_dir: str, lazyLoad: Optional[bool]= False):
     """
     Loads and processes the data.
     """
     input_prefix = 'data/Labelled_Data_IR_iDiffIR_corrected'
     fa_file = 'data/data.fa'
-    final_dataset = DatasetLoad(input_prefix,fa_file)
+    final_dataset = DatasetLoad(input_prefix,fa_file,lazyLoad)
     train_indices, valid_indices, test_indices = get_indices(len(final_dataset), test_split, output_dir)
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(valid_indices)

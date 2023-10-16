@@ -1,13 +1,12 @@
 {
     "paths": {
-      "train_data": "/data/",
-      "train_target": "/data/",
-      "valid_data": "/data/",
-      "valid_target": "/data/",
-      "test_data": "/data/",      
-      "test_target": "/data/",
-      "results_path": "results",
-      "relevant_targets": "TFs"
+      "train_data": "/data/data_TFs_train.npy",
+      "train_target": "/data/target_TF_train.npy",
+      "valid_data": "/data/data_TFs_valid.npy",
+      "valid_target": "/data/target_TF_valid.npy",
+      "test_data": "/data/data_TFs_test.npy",      
+      "test_target": "/data/target_TF_test.npy",
+      "results_path": "results/results_LR/only_TFs"
     },
     "optimizer_params": {
       "optimizer": "adamw",

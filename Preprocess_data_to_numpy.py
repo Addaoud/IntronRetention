@@ -2,9 +2,9 @@ import os
 import argparse
 import torch
 import numpy as np
-from utils import split_targets
-from dataset_utils import load_datasets
-from networks import generate_SEI
+from src.utils import split_targets
+from src.dataset_utils import load_datasets
+from src.networks import generate_SEI
 
 
 def parse_arguments(parser):
