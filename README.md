@@ -1,6 +1,6 @@
 # Intron retention
 
-<img src="https://github.com/Addaoud/IntronRetention/blob/main/model.jpg" width="160">
+<img src="https://github.com/Addaoud/IntronRetention/blob/main/model.PNG" width="640">
 
 ## Introduction
 This repositery provides code and experiments to demonstrate the value of foundation models of chromatin state for accurate prediction of human introns that are subject to intron retention (IR). We used two approaches for leveraging the [Sei](https://github.com/FunctionLab/sei-framework) architecture for predicting retained introns: The Fine-tuned Sei version uses the representation learned by the Sei convolutional layers, adding an additional convolutional block plus pooling and fully connected and output layers. Alternatively, the Sei-outputs version uses the chromatin targets learned by Sei (transcription factor binding, histone modifications, and chromatin accessibility) and uses these as input to a logistic regression or light-GBM classifier. Furthermore, this repositery uses a novel approach to score the relevance of each transcription factor in the Jaspar Database in intron retention, using Integrated Gradients (IG). The data was obtained from [here](https://github.com/fahadahaf/chromir). You can find a description on the number of sequences in each class, the sequence length, and the number of sequences with ambiguous bps in the notebook [Data_description.ipynb](https://github.com/Addaoud/IntronRetention/blob/main/Data_description.ipynb).
