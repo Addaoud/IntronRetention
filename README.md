@@ -3,16 +3,16 @@
 <img src="https://github.com/Addaoud/IntronRetention/blob/main/model.PNG" width="640">
 
 ## Introduction
-This repositery provides code and experiments to demonstrate the value of foundation models of chromatin state for accurate prediction of human introns that are subject to intron retention (IR). We used two approaches for leveraging the [Sei](https://github.com/FunctionLab/sei-framework) architecture for predicting retained introns: The Fine-tuned Sei version uses the representation learned by the Sei convolutional layers, adding an additional convolutional block plus pooling and fully connected and output layers. Alternatively, the Sei-outputs version uses the chromatin targets learned by Sei (transcription factor binding, histone modifications, and chromatin accessibility) and uses these as input to a logistic regression or light-GBM classifier. Furthermore, this repositery uses a novel approach to score the relevance of each transcription factor in the Jaspar Database in intron retention, using Integrated Gradients (IG). The data was obtained from [here](https://github.com/fahadahaf/chromir). You can find a description on the number of sequences in each class, the sequence length, and the number of sequences with ambiguous bps in the notebook [Data_description.ipynb](https://github.com/Addaoud/IntronRetention/blob/main/Data_description.ipynb).
+This repository provides code and experiments to demonstrate the value of foundation models of chromatin state for accurate prediction of human introns that are subject to intron retention (IR). We used two approaches for leveraging the [Sei](https://github.com/FunctionLab/sei-framework) architecture for predicting retained introns: The Fine-tuned Sei version uses the representation learned by the Sei convolutional layers, adding a convolutional block plus pooling and fully connected and output layers. Alternatively, the Sei-outputs version uses the chromatin targets learned by Sei (transcription factor binding, histone modifications, and chromatin accessibility) and uses these as input to a logistic regression or light-GBM classifier. Furthermore, this repository uses a novel approach to score the relevance of each transcription factor in the Jaspar Database in intron retention, using Integrated Gradients (IG). The data was obtained from [here](https://github.com/fahadahaf/chromir). You can find a description on the number of sequences in each class, the sequence length, and the number of sequences with ambiguous bps in the notebook [Data_description.ipynb](https://github.com/Addaoud/IntronRetention/blob/main/Data_description.ipynb).
 
 ## Installation
-You can clone this repositery using the command:
+You can clone this repository using the command:
 ```
 git clone https://github.com/Addaoud/IntronRetention.git
 ```
 
 ## Dependencies
-You can create a python virtual envirenemnt or an anaconda envirenemnt to install the dependencies using pip or conda:
+You can create a python virtual environment or an anaconda environment to install the dependencies using pip or conda:
 ```
 pip install -r requirements.txt
 conda install -r requirements.txt
@@ -30,7 +30,7 @@ python3 Preprocess_data_to_numpy.py --dir directory_where_to_save_the_numpy_file
 python3 LR.py --json path_to_LR_json -n
 python3 LR.py --json path_to_LR_json -m existing_model_path 
 ```
-  * You can train the LGBM model (and optionally perform a bayesian optimization to search for the best hyperparameters) using the following command lines:
+  * You can train the LGBM model (and optionally perform a Bayesian optimization to search for the best hyperparameters) using the following command lines:
 ```
 python3 LR.py --json path_to_LR_json --optimize
 ```
