@@ -13,9 +13,6 @@ sns.set()
 from src.utils import create_path, save_model_log, save_data_to_csv, generate_UDir, split_targets, read_json
 from src.results_utils import plot_distribution
 
-global data_folder
-data_folder = 'data/'
-results_folder = os.path.join('results','results_LGBM')
 
 def bayes_parameter_opt_lgb(X, y, init_round=15, opt_round=25, learning_rate=0.01):
     # prepare data
