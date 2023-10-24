@@ -1,18 +1,21 @@
 import torch.nn as nn
 from typing import Optional
-import torch 
+import torch
 import numpy as np
 from scipy.interpolate import splev
 from torch import einsum
 
+
 class LogisticRegression(nn.Module):
-    def __init__(self,input_dim,output_dim):
+    def __init__(self, input_dim, output_dim):
         super(LogisticRegression, self).__init__()
         self.linear = nn.Linear(input_dim, output_dim)
-    def forward(self,x):
+
+    def forward(self, x):
         output = self.linear(x)
-        return (output)
-    
+        return output
+
+
 def bs(x, df=None, knots=None, degree=3, intercept=False):
     """
     df : int
@@ -37,15 +40,14 @@ def bs(x, df=None, knots=None, degree=3, intercept=False):
         n_inner_knots = df - order + (1 - intercept)
         if n_inner_knots < 0:
             n_inner_knots = 0
-            print("df was too small; have used %d"
-                  % (order - (1 - intercept)))
+            print("df was too small; have used %d" % (order - (1 - intercept)))
         if n_inner_knots > 0:
             inner_knots = np.percentile(
-                x, 100 * np.linspace(0, 1, n_inner_knots + 2)[1:-1])
+                x, 100 * np.linspace(0, 1, n_inner_knots + 2)[1:-1]
+            )
     elif knots is not None:
         inner_knots = knots
-    all_knots = np.concatenate(
-        ([np.min(x), np.max(x)] * order, inner_knots))
+    all_knots = np.concatenate(([np.min(x), np.max(x)] * order, inner_knots))
     all_knots.sort()
     n_basis = len(all_knots) - (degree + 1)
     basis = np.empty((x.shape[0], n_basis), dtype=float)
@@ -57,19 +59,19 @@ def bs(x, df=None, knots=None, degree=3, intercept=False):
         basis = basis[:, 1:]
     return basis
 
+
 def spline_factory(n, df, log=False):
     if log:
-        dist = np.array(np.arange(n) - n/2.0)
-        dist = np.log(np.abs(dist) + 1) * ( 2*(dist>0)-1)
+        dist = np.array(np.arange(n) - n / 2.0)
+        dist = np.log(np.abs(dist) + 1) * (2 * (dist > 0) - 1)
         n_knots = df - 4
-        knots = np.linspace(np.min(dist),np.max(dist),n_knots+2)[1:-1]
-        return torch.from_numpy(bs(
-            dist, knots=knots, intercept=True)).float()
+        knots = np.linspace(np.min(dist), np.max(dist), n_knots + 2)[1:-1]
+        return torch.from_numpy(bs(dist, knots=knots, intercept=True)).float()
     else:
         dist = np.arange(n)
-        return torch.from_numpy(bs(
-            dist, df=df, intercept=True)).float()
-    
+        return torch.from_numpy(bs(dist, df=df, intercept=True)).float()
+
+
 class BSplineTransformation(nn.Module):
     def __init__(self, degrees_of_freedom, log=False, scaled=False):
         super(BSplineTransformation, self).__init__()
@@ -77,6 +79,7 @@ class BSplineTransformation(nn.Module):
         self._log = log
         self._scaled = scaled
         self._df = degrees_of_freedom
+
     def forward(self, input):
         if self._spline_tr is None:
             spatial_dim = input.size()[-1]
@@ -85,9 +88,9 @@ class BSplineTransformation(nn.Module):
                 self._spline_tr = self._spline_tr / spatial_dim
             if input.is_cuda:
                 self._spline_tr = self._spline_tr.cuda()
-        return  torch.matmul(input, self._spline_tr)
-    
-    
+        return torch.matmul(input, self._spline_tr)
+
+
 class Sei(nn.Module):
     def __init__(self, sequence_length=600, n_genomic_features=21907):
         """
@@ -99,63 +102,76 @@ class Sei(nn.Module):
         super(Sei, self).__init__()
         self.lconv1 = nn.Sequential(
             nn.Conv1d(4, 480, kernel_size=9, padding=4),
-            nn.Conv1d(480, 480, kernel_size=9, padding=4))
+            nn.Conv1d(480, 480, kernel_size=9, padding=4),
+        )
         self.conv1 = nn.Sequential(
             nn.Conv1d(480, 480, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
             nn.Conv1d(480, 480, kernel_size=9, padding=4),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
         self.lconv2 = nn.Sequential(
             nn.MaxPool1d(kernel_size=4, stride=4),
             nn.Dropout(p=0.2),
             nn.Conv1d(480, 640, kernel_size=9, padding=4),
-            nn.Conv1d(640, 640, kernel_size=9, padding=4))
+            nn.Conv1d(640, 640, kernel_size=9, padding=4),
+        )
         self.conv2 = nn.Sequential(
             nn.Dropout(p=0.2),
-            nn.Conv1d(640, 640, kernel_size=9,padding=4),
+            nn.Conv1d(640, 640, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
-            nn.Conv1d(640, 640, kernel_size=9,padding=4),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(640, 640, kernel_size=9, padding=4),
+            nn.ReLU(inplace=True),
+        )
         self.lconv3 = nn.Sequential(
             nn.MaxPool1d(kernel_size=4, stride=4),
             nn.Dropout(p=0.2),
             nn.Conv1d(640, 960, kernel_size=9, padding=4),
-            nn.Conv1d(960, 960, kernel_size=9, padding=4))
+            nn.Conv1d(960, 960, kernel_size=9, padding=4),
+        )
         self.conv3 = nn.Sequential(
             nn.Dropout(p=0.2),
-            nn.Conv1d(960, 960, kernel_size=9,padding=4),
+            nn.Conv1d(960, 960, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
-            nn.Conv1d(960, 960, kernel_size=9,padding=4),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(960, 960, kernel_size=9, padding=4),
+            nn.ReLU(inplace=True),
+        )
         self.dconv1 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(960, 960, kernel_size=5, dilation=2, padding=4),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
         self.dconv2 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(960, 960, kernel_size=5, dilation=4, padding=8),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
         self.dconv3 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(960, 960, kernel_size=5, dilation=8, padding=16),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
         self.dconv4 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(960, 960, kernel_size=5, dilation=16, padding=32),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
         self.dconv5 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(960, 960, kernel_size=5, dilation=25, padding=50),
-            nn.ReLU(inplace=True))
-        self._spline_df = int(128/8)        
+            nn.ReLU(inplace=True),
+        )
+        self._spline_df = int(128 / 8)
         self.spline_tr = nn.Sequential(
-            nn.Dropout(p=0.5),
-            BSplineTransformation(self._spline_df, scaled=False))
+            nn.Dropout(p=0.5), BSplineTransformation(self._spline_df, scaled=False)
+        )
         self.classifier = nn.Sequential(
             nn.Linear(960 * self._spline_df, n_genomic_features),
             nn.ReLU(inplace=True),
             nn.Linear(n_genomic_features, n_genomic_features),
-            nn.Sigmoid())
+            nn.Sigmoid(),
+        )
+
     def forward(self, x):
         """
         Forward propagation of a batch.
@@ -180,23 +196,23 @@ class Sei(nn.Module):
         reshape_out = spline_out.view(spline_out.size(0), 960 * self._spline_df)
         predict = self.classifier(reshape_out)
         return predict
-    
+
+
 def generate_SEI():
-    net=Sei()
-    model_pretrained_dict=torch.load('sei.pth')
-    keys_pretrained=list(model_pretrained_dict.keys())
-    keys_net=list(net.state_dict())
-    model_weights=net.state_dict()
-    for i in range (len(keys_net)):
-        model_weights[keys_net[i]]=model_pretrained_dict[keys_pretrained[i]]
+    net = Sei()
+    model_pretrained_dict = torch.load("sei.pth")
+    keys_pretrained = list(model_pretrained_dict.keys())
+    keys_net = list(net.state_dict())
+    model_weights = net.state_dict()
+    for i in range(len(keys_net)):
+        model_weights[keys_net[i]] = model_pretrained_dict[keys_pretrained[i]]
     net.load_state_dict(model_weights)
-    print('Model succesfully loaded with pretrained weights')
+    print("Model succesfully loaded with pretrained weights")
     return net
 
+
 class FSei(nn.Module):
-
     def __init__(self, FCNN=160, n_genomic_features=2):
-
         """
         Parameters
         ----------
@@ -210,73 +226,95 @@ class FSei(nn.Module):
         self.max = nn.MaxPool1d(kernel_size=4, stride=4)
         self.lconv1 = nn.Sequential(
             nn.Conv1d(4, 3 * self.FCNN, kernel_size=9, padding=4),
-            nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4))
+            nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
+        )
 
         self.conv1 = nn.Sequential(
             nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
             nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
 
         self.lconv2 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(3 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
-            nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4))
+            nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
+        )
 
         self.conv2 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
             nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
 
         self.lconv3 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(4 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4))
+            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
+        )
 
         self.conv3 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
             nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
 
         self.dconv1 = nn.Sequential(
             nn.Dropout(p=0.10),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=2, padding=4),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(
+                6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=2, padding=4
+            ),
+            nn.ReLU(inplace=True),
+        )
 
         self.dconv2 = nn.Sequential(
             nn.Dropout(p=0.10),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=4, padding=8),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(
+                6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=4, padding=8
+            ),
+            nn.ReLU(inplace=True),
+        )
 
         self.dconv3 = nn.Sequential(
             nn.Dropout(p=0.10),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=8, padding=16),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(
+                6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=8, padding=16
+            ),
+            nn.ReLU(inplace=True),
+        )
 
         self.dconv4 = nn.Sequential(
             nn.Dropout(p=0.10),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=16, padding=32),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(
+                6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=16, padding=32
+            ),
+            nn.ReLU(inplace=True),
+        )
 
         self.dconv5 = nn.Sequential(
             nn.Dropout(p=0.10),
-            nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=25, padding=50),
-            nn.ReLU(inplace=True))
+            nn.Conv1d(
+                6 * self.FCNN, 6 * self.FCNN, kernel_size=5, dilation=25, padding=50
+            ),
+            nn.ReLU(inplace=True),
+        )
 
         self._spline_df = 16
 
         self.spline_tr = nn.Sequential(
-            BSplineTransformation(self._spline_df, scaled=False))
+            BSplineTransformation(self._spline_df, scaled=False)
+        )
 
     def forward(self, x):
         """
         Forward propagation of a batch.
         """
-        #Sei model
+        # Sei model
         lout1 = self.lconv1(x)
         out1 = self.conv1(lout1)
         lout2 = self.lconv2(self.max(out1 + lout1))
@@ -296,138 +334,175 @@ class FSei(nn.Module):
         spline_out = self.spline_tr(out)
         return spline_out
 
+
 class AttentionPool(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.to_attn_logits = nn.Parameter(torch.eye(dim)) # 960*960
+        self.to_attn_logits = nn.Parameter(torch.eye(dim))  # 960*960
+
     def forward(self, x):
-        attn_logits = einsum('b n d, d e -> b n e', x, self.to_attn_logits) # 64*16*960 , 960*960
-        attn = attn_logits.softmax(dim = -2) # 64*1*16*960 => 64*1*16*960
-        return (x * attn).sum(dim = -2).squeeze()
-    
+        attn_logits = einsum(
+            "b n d, d e -> b n e", x, self.to_attn_logits
+        )  # 64*16*960 , 960*960
+        attn = attn_logits.softmax(dim=-2)  # 64*1*16*960 => 64*1*16*960
+        return (x * attn).sum(dim=-2).squeeze()
+
+
 class finetunedmodel(nn.Module):
-    def __init__(self,pretrain_model,hidden_dim,embed_dim):
+    def __init__(self, pretrain_model, hidden_dim, embed_dim):
         super().__init__()
         self.pretrain_model = pretrain_model
-        self.project=nn.Sequential(
-            nn.Conv1d(hidden_dim, embed_dim, kernel_size=3), # 16*960*4
+        self.project = nn.Sequential(
+            nn.Conv1d(hidden_dim, embed_dim, kernel_size=3),  # 16*960*4
             nn.BatchNorm1d(embed_dim),
             nn.ReLU(inplace=True),
         )
         self.attention_pool = AttentionPool(embed_dim)
         self.fcn = nn.Sequential(
-            nn.Linear(embed_dim , embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.2))
-        self.prediction_head=nn.Linear(embed_dim,2)
+            nn.Linear(embed_dim, embed_dim), nn.ReLU(inplace=True), nn.Dropout(p=0.2)
+        )
+        self.prediction_head = nn.Linear(embed_dim, 2)
+
     def forward(self, x):
-        x=self.pretrain_model(x)
+        x = self.pretrain_model(x)
         x = self.project(x)
-        x= x.permute(0, 2, 1)
+        x = x.permute(0, 2, 1)
         x = self.attention_pool(x)
         x = self.fcn(x)
-        x=self.prediction_head(x.squeeze()) 
+        x = self.prediction_head(x.squeeze())
         return x
-    
-def generate_FSei(new_model: bool, use_pretrain: bool, freeze_weights: bool, model_path: Optional[str] = None):
+
+
+def generate_FSei(
+    new_model: bool,
+    use_pretrain: bool,
+    freeze_weights: bool,
+    model_path: Optional[str] = None,
+):
     if new_model:
-        sei=FSei()
+        sei = FSei()
     else:
-        sei=torch.load(model_path)
+        sei = torch.load(model_path)
     if use_pretrain:
-        model_pretrained_dict=torch.load('sei.pth')
-        keys_pretrained=list(model_pretrained_dict.keys())[:34]
-        keys_net=list(sei.state_dict())[:34]
-        model_weights=sei.state_dict()
-        for i in range (len(keys_net)):
-            model_weights[keys_net[i]]=model_pretrained_dict[keys_pretrained[i]]
+        model_pretrained_dict = torch.load("sei.pth")
+        keys_pretrained = list(model_pretrained_dict.keys())[:34]
+        keys_net = list(sei.state_dict())[:34]
+        model_weights = sei.state_dict()
+        for i in range(len(keys_net)):
+            model_weights[keys_net[i]] = model_pretrained_dict[keys_pretrained[i]]
         sei.load_state_dict(model_weights)
         if freeze_weights:
-            model_params=list(sei.parameters())
-            for i in range (len(keys_net)):
-                model_params[i].requires_grad=False
-        print('Model succesfully loaded with pretrained weights')
-    hidden_dim=960
-    embed_dim=520
-    net = finetunedmodel(sei,hidden_dim,embed_dim)
+            model_params = list(sei.parameters())
+            for i in range(len(keys_net)):
+                model_params[i].requires_grad = False
+        print("Model succesfully loaded with pretrained weights")
+    hidden_dim = 960
+    embed_dim = 520
+    net = finetunedmodel(sei, hidden_dim, embed_dim)
     return net
 
+
+class Exponential(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return torch.exp(x)
+
+
 class Basset(nn.Module):
-    def __init__(self, params, wvmodel=None, useEmbeddings = False):
+    def __init__(self, params, wvmodel=None, useEmbeddings=False):
         super(Basset, self).__init__()
-        self.CNN1filters = params['CNN1_filters']
-        self.CNN1filterSize = params['CNN1_filtersize']
-        self.CNN1poolSize = params['CNN1_poolsize']
-        self.CNN1padding = params['CNN1_padding']
-        self.CNN1useExponential = params['CNN1_useexponential']
-        self.CNN2filters = params['CNN2_filters']
-        self.CNN2filterSize = params['CNN2_filtersize']
-        self.CNN2poolSize = params['CNN2_poolsize']
-        self.CNN2padding = params['CNN2_padding']
-        self.CNN3filters = params['CNN3_filters']
-        self.CNN3filterSize = params['CNN3_filtersize']
-        self.CNN3poolSize = params['CNN3_poolsize']
-        self.CNN3padding = params['CNN3_padding']
-        self.FC1inputSize = params['FC1_inputsize']
-        self.FC1outputSize = params['FC1_outputsize']
-        self.FC2outputSize = params['FC2_outputsize']
-        self.numClasses = params['num_classes']
+        self.CNN1filters = params["CNN1_filters"]
+        self.CNN1filterSize = params["CNN1_filtersize"]
+        self.CNN1poolSize = params["CNN1_poolsize"]
+        self.CNN1padding = params["CNN1_padding"]
+        self.CNN1useExponential = params["CNN1_useexponential"]
+        self.CNN2filters = params["CNN2_filters"]
+        self.CNN2filterSize = params["CNN2_filtersize"]
+        self.CNN2poolSize = params["CNN2_poolsize"]
+        self.CNN2padding = params["CNN2_padding"]
+        self.CNN3filters = params["CNN3_filters"]
+        self.CNN3filterSize = params["CNN3_filtersize"]
+        self.CNN3poolSize = params["CNN3_poolsize"]
+        self.CNN3padding = params["CNN3_padding"]
+        self.FC1inputSize = params["FC1_inputsize"]
+        self.FC1outputSize = params["FC1_outputsize"]
+        self.FC2outputSize = params["FC2_outputsize"]
+        self.numClasses = params["num_classes"]
 
         self.useEmbeddings = useEmbeddings
         if not self.useEmbeddings:
-            self.numInputChannels = params['input_channels'] #number of channels, one hot encoding
+            self.numInputChannels = params[
+                "input_channels"
+            ]  # number of channels, one hot encoding
         else:
-            self.embSize = params['embd_size']
+            self.embSize = params["embd_size"]
             weights = torch.FloatTensor(wvmodel.wv.vectors)
             self.embedding = nn.Embedding.from_pretrained(weights, freeze=False)
             self.numInputChannels = self.embSize
 
-        self.layer1  = nn.Sequential(
-            nn.Conv1d(in_channels=self.numInputChannels,
-                      out_channels=self.CNN1filters,
-                      kernel_size=self.CNN1filterSize,
-                      padding=self.CNN1padding,
-                      bias=False), #if using batchnorm, no need to use bias in a CNN
+        self.layer1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels=self.numInputChannels,
+                out_channels=self.CNN1filters,
+                kernel_size=self.CNN1filterSize,
+                padding=self.CNN1padding,
+                bias=False,
+            ),  # if using batchnorm, no need to use bias in a CNN
             nn.BatchNorm1d(num_features=self.CNN1filters),
-            nn.ReLU() if self.CNN1useExponential==False else Exponential(),
-            nn.MaxPool1d(kernel_size=self.CNN1poolSize))
+            nn.ReLU() if self.CNN1useExponential == False else Exponential(),
+            nn.MaxPool1d(kernel_size=self.CNN1poolSize),
+        )
         self.dropout1 = nn.Dropout(p=0.2)
 
         self.layer2 = nn.Sequential(
-            nn.Conv1d(in_channels=self.CNN1filters,
-                      out_channels=self.CNN2filters,
-                      kernel_size=self.CNN2filterSize,
-                      padding=self.CNN2padding,
-                      bias=False),
+            nn.Conv1d(
+                in_channels=self.CNN1filters,
+                out_channels=self.CNN2filters,
+                kernel_size=self.CNN2filterSize,
+                padding=self.CNN2padding,
+                bias=False,
+            ),
             nn.BatchNorm1d(num_features=self.CNN2filters),
-            nn.ReLU())
+            nn.ReLU(),
+        )
         self.dropout2 = nn.Dropout(p=0.2)
 
         self.layer3 = nn.Sequential(
-            nn.Conv1d(in_channels=self.CNN2filters,
-                      out_channels=self.CNN3filters,
-                      kernel_size=self.CNN3filterSize,
-                      padding=self.CNN3padding,
-                      bias=False),
+            nn.Conv1d(
+                in_channels=self.CNN2filters,
+                out_channels=self.CNN3filters,
+                kernel_size=self.CNN3filterSize,
+                padding=self.CNN3padding,
+                bias=False,
+            ),
             nn.BatchNorm1d(num_features=self.CNN3filters),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=self.CNN3poolSize))
+            nn.MaxPool1d(kernel_size=self.CNN3poolSize),
+        )
         self.dropout3 = nn.Dropout(p=0.2)
 
-        self.fc1 = nn.Linear(in_features=self.FC1inputSize, out_features=self.FC1outputSize)
+        self.fc1 = nn.Linear(
+            in_features=self.FC1inputSize, out_features=self.FC1outputSize
+        )
         self.relu4 = nn.ReLU()
         self.dropout4 = nn.Dropout(p=0.4)
 
-        self.fc2 = nn.Linear(in_features=self.FC1outputSize, out_features=self.FC2outputSize)
+        self.fc2 = nn.Linear(
+            in_features=self.FC1outputSize, out_features=self.FC2outputSize
+        )
         self.relu5 = nn.ReLU()
         self.dropout5 = nn.Dropout(p=0.4)
 
-        self.fc3 = nn.Linear(in_features=self.FC2outputSize, out_features=self.numClasses)
+        self.fc3 = nn.Linear(
+            in_features=self.FC2outputSize, out_features=self.numClasses
+        )
 
     def forward(self, inputs):
         if self.useEmbeddings:
             output = self.embedding(inputs)
-            output = output.permute(0,2,1)
+            output = output.permute(0, 2, 1)
         else:
             output = inputs
         output = self.layer1(output)
