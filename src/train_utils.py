@@ -7,6 +7,7 @@ from utils import save_model_log, save_data_to_csv, plot_loss
 from fastprogress import progress_bar
 from typing import List
 
+
 def train_loop(
     device, model, dataloader, loss_fn, optimizer, n_accumulated_batches: int
 ) -> float:
@@ -15,8 +16,8 @@ def train_loop(
     """
     model.train()
     loss_per_epoch = 0
-    for batch_idx, (data,target) in enumerate(dataloader):
-        data,target = data.to(device,dtype=torch.float),target.to(device)
+    for batch_idx, (data, target) in enumerate(dataloader):
+        data, target = data.to(device, dtype=torch.float), target.to(device)
         pred = model(data)
         loss = loss_fn(pred, target)
         # normalize loss to account for batch accumulation
@@ -31,6 +32,7 @@ def train_loop(
             optimizer.zero_grad()
     return loss_per_epoch / (batch_idx + 1)
 
+
 def get_valid_loss(model, device, dataloader, loss_fn) -> float:
     """
     get the average loss function on dataloader
@@ -39,12 +41,13 @@ def get_valid_loss(model, device, dataloader, loss_fn) -> float:
         model.eval()
         valid_loss = 0
         for batch_idx, (data, target) in enumerate(dataloader):
-            data,target = data.to(device,dtype=torch.float),target.to(device)
+            data, target = data.to(device, dtype=torch.float), target.to(device)
             output = model(data)
             loss = loss_fn(output, target)
             valid_loss += loss.item()
-    valid_loss /= (batch_idx + 1)
+    valid_loss /= batch_idx + 1
     return valid_loss
+
 
 def train_model(
     model,
@@ -142,6 +145,7 @@ def train_model(
     plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
     return model_path
 
+
 def onehot_encode_labels(labels_list: List[int], num_labels: int):
     """
     creates one hot encoded labels, e.g. [0,1,2] => [ [1,0,0] , [0,1,0] , [0,0,1] ]
@@ -154,6 +158,7 @@ def onehot_encode_labels(labels_list: List[int], num_labels: int):
     """
     return np.eye(num_labels)[labels_list]
 
+
 def evaluate_model(model, dataloader, activation_function, device):
     """
     evaluate the model on dataloader and return the accuracy, auroc, and auprc
@@ -164,36 +169,44 @@ def evaluate_model(model, dataloader, activation_function, device):
     with torch.no_grad():
         model.eval()
         for idx, (data, target) in enumerate(dataloader):
-            data,target = data.to(device,dtype=torch.float),target.numpy()
+            data, target = data.to(device, dtype=torch.float), target.numpy()
             output = activation_function(model(data))
             preds = output.cpu().detach().numpy()
             if preds.shape[1] == 1:
-                auroc_list.append(metrics.roc_auc_score(target,preds))
+                auroc_list.append(metrics.roc_auc_score(target, preds))
                 amax = np.round(preds) == target
                 accuracy_list.append(sum(list(amax)) / len(target))
-                precision, recall, thresholds = metrics.precision_recall_curve(target, preds)
+                precision, recall, thresholds = metrics.precision_recall_curve(
+                    target, preds
+                )
                 auprc_list.append(np.mean(metrics.auc(recall, precision)))
             elif preds.shape[1] == 2:
-                auroc_list.append(metrics.roc_auc_score(target,preds[:,1]))
-                amax = np.round(preds[:,1]) == target
+                auroc_list.append(metrics.roc_auc_score(target, preds[:, 1]))
+                amax = np.round(preds[:, 1]) == target
                 accuracy_list.append(sum(list(amax)).item() / len(target))
-                precision, recall, thresholds = metrics.precision_recall_curve(target,preds[:,1])
+                precision, recall, thresholds = metrics.precision_recall_curve(
+                    target, preds[:, 1]
+                )
                 auprc_list.append(np.mean(metrics.auc(recall, precision)))
-            else : 
-                onehot_encoded_labels = onehot_encode_labels(target.tolist(), preds.shape[1])
-                for i in range (preds.shape[1]):
+            else:
+                onehot_encoded_labels = onehot_encode_labels(
+                    target.tolist(), preds.shape[1]
+                )
+                for i in range(preds.shape[1]):
                     auroc_list.append(
-                        metrics.roc_auc_score(
-                            onehot_encoded_labels[:,i],
-                            preds[:,i]
+                        metrics.roc_auc_score(onehot_encoded_labels[:, i], preds[:, i])
+                    )
+                    amax = preds[:, i].argmax(1) == onehot_encoded_labels[:, i]
+                    accuracy_list.append(sum(list(amax)).item() / len(target))
+                    auprc_list.append(
+                        np.mean(
+                            metrics.average_precision_score(
+                                onehot_encode_labels(target.tolist(), preds.shape[1]),
+                                preds,
+                                average="macro",
+                            )
                         )
                     )
-                    amax = preds[:,i].argmax(1) == onehot_encoded_labels[:,i]
-                    accuracy_list.append(sum(list(amax)).item() / len(target))
-                    auprc_list.append(np.mean(metrics.average_precision_score(onehot_encode_labels(target.tolist(), 
-                                                                                                   preds.shape[1]),
-                                                                              preds, 
-                                                                              average="macro")))
     auroc = np.mean(auroc_list)
     auprc = np.mean(auprc_list)
     accuracy = np.mean(accuracy_list)
