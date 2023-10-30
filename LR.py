@@ -16,7 +16,7 @@ def parse_arguments(parser):
     parser.add_argument(
         "-n",
         "--new",
-        action="store_false",
+        action="store_true",
         help="Build a new logistic regression model",
     )
     parser.add_argument(
@@ -48,11 +48,10 @@ if __name__ == "__main__":
     ) = split_targets(targets_file_pth = 'target.names')
     
     train_loader,valid_loader,test_loader,input_dim,output_dim = dataLR(config=config)
-
     if args.new:
         model = LogisticRegression(input_dim,output_dim).to(device)
-        Udir = generate_UDir(path=config.results_paths.get('results_path'))
-        model_folder_path = os.path.join(config.results_paths.get('results_path'),Udir)
+        Udir = generate_UDir(path=config.paths.get('results_path'))
+        model_folder_path = os.path.join(config.paths.get('results_path'),Udir)
         create_path(model_folder_path)
     else:
         model_folder_path = os.path.dirname(args.model_path)
@@ -77,7 +76,7 @@ if __name__ == "__main__":
     #Prepare the loss function
     if output_dim == 1:
         loss_function = torch.nn.BCEWithLogitsLoss()
-        activation_function = torch.nn.Sigmoid(dim=1) 
+        activation_function = torch.nn.Sigmoid() 
     else:
         loss_function = torch.nn.CrossEntropyLoss()
         activation_function = torch.nn.Softmax(dim=1)
@@ -112,7 +111,7 @@ if __name__ == "__main__":
 
     accuracy, auroc, auprc = evaluate_model(model = model, dataloader = test_loader, activation_function = activation_function, device = device)
     data_dict = {'path':model_path,'accuracy':accuracy,'auroc':auroc,'auprc':auprc}
-    results_csv_path = os.path.join(config.results_paths.get('results_path'),'results.csv')
+    results_csv_path = os.path.join(config.paths.get('results_path'),'results.csv')
     save_data_to_csv(data_dictionary = data_dict, csv_file_path = results_csv_path)
 
     weights = list(model.parameters())[0].cpu().detach().numpy()[0]

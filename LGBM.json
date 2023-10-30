@@ -1,10 +1,10 @@
 {
     "paths": {
-      "train_data": "/data/data_TFs_train.npy",
+      "train_data": "/data/data_TF_train.npy",
       "train_target": "/data/target_TF_train.npy",
-      "valid_data": "/data/data_TFs_valid.npy",
+      "valid_data": "/data/data_TF_valid.npy",
       "valid_target": "/data/target_TF_valid.npy",
-      "test_data": "/data/data_TFs_test.npy",      
+      "test_data": "/data/data_TF_test.npy",      
       "test_target": "/data/target_TF_test.npy",
       "results_path": "results/results_LGBM/only_TFs"
     },

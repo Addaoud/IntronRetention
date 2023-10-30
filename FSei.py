@@ -45,14 +45,14 @@ if __name__ == "__main__":
     Chromatin_access_indices
     ) = split_targets(targets_file_pth = 'target.names')
     
-    batch_size = args.train_params.get('batch_size')
-    lazy_loading = args.train_params.get('lazy_loading')
+    batch_size = config.train_params.get('batch_size')
+    lazy_loading = config.train_params.get('lazy_loading')
     train_loader,valid_loader,test_loader = load_datasets(batchSize=batch_size, test_split=0.1, output_dir='data', lazyLoad=lazy_loading)
 
     if args.new:
         model = generate_FSei(new_model = True, use_pretrain = True, freeze_weights = False).to(device)
-        Udir = generate_UDir(path=args.results_paths.get('results_path'))
-        model_folder_path = os.path.join(args.results_paths.get('results_path'),Udir)
+        Udir = generate_UDir(path=config.paths.get('results_path'))
+        model_folder_path = os.path.join(config.paths.get('results_path'),Udir)
         create_path(model_folder_path)
     else:
         model_folder_path = os.path.dirname(args.model_path)
@@ -79,10 +79,10 @@ if __name__ == "__main__":
     activation_function = torch.nn.Softmax(dim=1)
   
     #Train params
-    max_epochs = args.train_params.get('max_epochs')
-    counter_for_early_stop = args.train_params.get('counter_for_early_stop')
-    epochs_to_check_loss = args.train_params.get('epochs_to_check_loss')
-    batch_accumulation = args.train_params.get('batch_accumulation')
+    max_epochs = config.train_params.get('max_epochs')
+    counter_for_early_stop = config.train_params.get('counter_for_early_stop')
+    epochs_to_check_loss = config.train_params.get('epochs_to_check_loss')
+    batch_accumulation = config.train_params.get('batch_accumulation')
     #Save train params in log file
     save_model_log(log_dir = model_folder_path, data_dictionary = {'batch_accumulation': batch_accumulation,
                                                                    'learning_rate': learning_rate,
@@ -106,5 +106,5 @@ if __name__ == "__main__":
 
     accuracy, auroc, auprc = evaluate_model(model = model, dataloader = test_loader, activation_function = activation_function, device = device)
     data_dict = {'path':model_path,'accuracy':accuracy,'auroc':auroc,'auprc':auprc}
-    results_csv_path = os.path.join(args.results_paths.get('results_path'),'results.csv')
+    results_csv_path = os.path.join(config.paths.get('results_path'),'results.csv')
     save_data_to_csv(data_dictionary = data_dict, csv_file_path = results_csv_path)

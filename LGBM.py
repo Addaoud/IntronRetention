@@ -3,10 +3,8 @@ import argparse
 import os
 from bayes_opt import BayesianOptimization
 import lightgbm as lgb
-from sklearn.model_selection import cross_val_score, cross_val_predict
 from sklearn import metrics
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 sns.set()

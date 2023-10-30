@@ -7,5 +7,7 @@ Prepare numpy data.ipynb
 VirtualEnv
 __pycache__
 .vscode
-Sei.pth
+sei.pth
 target.names
+data
+results
