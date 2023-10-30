@@ -30,7 +30,7 @@ def generate_UDir(path: str, UID_length: Optional[int] = 6) -> str:
     Generates a UID of length UID_length that shouldn't exist in the provided path.
     """
     UID = "".join([str(random.randint(0, 9)) for i in range(UID_length)])
-    while os.path.exists(os.path.join(path, UID + format)):
+    while os.path.exists(os.path.join(path, UID)):
         UID = "".join([str(random.randint(0, 9)) for i in range(UID_length)])
     return UID
 
@@ -188,7 +188,7 @@ def hot_encode_sequence(
         "N": [1, 1, 1, 1],
     }
     unambig_bases = {"A", "C", "G", "T"}
-    if length_after_padding == 0:
+    if (length_after_padding == 0) or (length_after_padding<len(sequence)):
         hot_encoded_seq = np.zeros((4, len(sequence)), dtype=np.float32)
     else:
         hot_encoded_seq = np.zeros((4, length_after_padding), dtype=np.float32)

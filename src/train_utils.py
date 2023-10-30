@@ -3,7 +3,7 @@ import numpy as np
 import os
 from sklearn import metrics
 from datetime import datetime
-from utils import save_model_log, save_data_to_csv, plot_loss
+from .utils import save_model_log, save_data_to_csv, plot_loss
 from fastprogress import progress_bar
 from typing import List
 
@@ -127,7 +127,7 @@ def train_model(
                 )
                 torch.save(model, model_path)
                 plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
-                return model
+                return model_path
         save_data_to_csv(
             data_dictionary={
                 "epoch": epoch,

@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchsampler import ImbalancedDatasetSampler
 from torch.utils.data.sampler import SubsetRandomSampler
-from utils import hot_encode_sequence
+from .utils import hot_encode_sequence
 
 
 def get_indices(
@@ -67,14 +67,17 @@ class datasetLR(Dataset):
 
 
 def dataLR(config):
-    train_data = np.load(config.data_paths.get("train_data"))
-    train_target = np.load(config.data_paths.get("train_target"))
-    valid_data = np.load(config.data_paths.get("valid_data"))
-    valid_target = np.load(config.data_paths.get("valid_target"))
-    test_data = np.load(config.data_paths.get("test_data"))
-    test_target = np.load(config.data_paths.get("test_target"))
+    train_data = np.load(config.paths.get("train_data"))
+    train_target = np.load(config.paths.get("train_target"))
+    valid_data = np.load(config.paths.get("valid_data"))
+    valid_target = np.load(config.paths.get("valid_target"))
+    test_data = np.load(config.paths.get("test_data"))
+    test_target = np.load(config.paths.get("test_target"))
     input_dim = train_data.shape[1]
-    output_dim = train_target.shape[1]
+    try:
+        output_dim = train_target.shape[1]
+    except:
+        output_dim = 1
     batch_size = config.train_params.get("batch_size")
     imbalanced_data = config.train_params.get("imbalanced_data")
     Train_dataset = datasetLR(train_data, train_target)
@@ -101,31 +104,17 @@ class DatasetLoad(Dataset):
         lazyLoad: Optional[bool] = False,
         length_after_padding: Optional[int] = 0,
     ):
-        self.DNAalphabet = {"A": "0", "C": "1", "G": "2", "T": "3"}
-        df_path = df_path.split(".")[0]  # just in case the user provide extension
-        self.df_all = pd.read_csv(df_path + ".txt", delimiter="\t", header=None)
-        self.df_seq = pd.read_csv(fa_file, header=None)
-        strand = self.df_seq[0][0][-3:]  # can be (+) or (.)
-        self.df_all["header"] = self.df_all.apply(
-            lambda x: ">" + x[0] + ":" + str(x[1]) + "-" + str(x[2]) + strand, axis=1
-        )
-        self.df_seq_all = pd.concat(
-            [
-                self.df_seq[::2].reset_index(drop=True),
-                self.df_seq[1::2].reset_index(drop=True),
-            ],
-            axis=1,
-            sort=False,
-        )
-        self.df_seq_all.columns = ["header", "sequence"]
-        self.df_seq_all = self.df_seq_all["sequence"].apply(lambda x: x.upper())
+        self.DNAalphabet = {'A':'0', 'C':'1', 'G':'2', 'T':'3'}
+        df_path = df_path.split('.')[0] #just in case the user provide extension
+        self.df_all = pd.read_csv(df_path+'.txt',delimiter='\t',header=None)
+        self.df_seq = pd.read_csv(fa_file,header=None)
+        strand = self.df_seq[0][0][-3:] #can be (+) or (.) 
+        self.df_all['header'] = self.df_all.apply(lambda x: '>'+x[0]+':'+str(x[1])+'-'+str(x[2])+strand, axis=1)
+        self.df_seq_all = pd.concat([self.df_seq[::2].reset_index(drop=True), self.df_seq[1::2].reset_index(drop=True)], axis=1, sort=False)
+        self.df_seq_all.columns = ["header","sequence"]
+        self.df_seq_all['sequence'] = self.df_seq_all['sequence'].apply(lambda x: x.upper())
         self.df_all.rename(columns={7: "label"}, inplace=True)
-        self.df_final = pd.merge(
-            self.df_seq_all["header", "sequence"],
-            self.df_test["header", "label"],
-            on="header",
-            how="inner",
-        )
+        self.df_final = pd.merge(self.df_seq_all[['header',"sequence"]],self.df_all[['header','label']],on='header',how='inner')
         self.df_final.drop_duplicates(inplace=True)
         self.df_final = self.df_final.reset_index()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
@@ -144,7 +133,7 @@ class DatasetLoad(Dataset):
                 )
 
     def __len__(self):
-        return self.df.shape[0]
+        return self.df_final.shape[0]
 
     def get_all_data(self):
         return self.df_final

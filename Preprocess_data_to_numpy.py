@@ -21,7 +21,7 @@ def map_seq_to_sei_output(
     data_y = []
     with torch.no_grad():
         model.eval()
-        for _, (data, target) in progress_bar(enumerate(data_loader)):
+        for _, (data, target) in enumerate(progress_bar(data_loader)):
             data = data.to(device, dtype=torch.float)
             if Target_indices != None:
                 outputs = model(data)[:, Target_indices]
@@ -58,9 +58,9 @@ if __name__ == "__main__":
     ) = split_targets(targets_file_pth="target.names")
 
     SEI = generate_SEI().to(device)
-    batchSize = 32
+    batchSize = 216
     train_loader, valid_loader, test_loader = load_datasets(
-        batchSize=batchSize, test_split=0.1, output_dir="data"
+        batchSize=batchSize, test_split=0.1, output_dir="data", length_after_padding=4096
     )
     print("processing all targets")
     train_data_path = os.path.join(data_folder, "data_ALL_train.npy")
