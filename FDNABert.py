@@ -10,16 +10,12 @@ from src.utils import (
     save_model_log,
     save_data_to_csv,
     generate_UDir,
-    split_targets,
     read_json,
 )
-from src.dataset_utils import dataLR
 from src.train_utils import train_model, evaluate_model
-from src.results_utils import plot_distribution
-from src.networks import LogisticRegression
-from src.seed import set_seed
-
-set_seed()
+from src.dataset_utils import load_datasets
+from src.networks import generate_FDNABert
+from transformers import AutoTokenizer
 
 
 def parse_arguments(parser):
@@ -28,7 +24,7 @@ def parse_arguments(parser):
         "-n",
         "--new",
         action="store_true",
-        help="Build a new logistic regression model",
+        help="Build a new model",
     )
     parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
     args = parser.parse_args()
@@ -51,21 +47,24 @@ if __name__ == "__main__":
     config = read_json(json_path=args.json)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    (
-        Sei_targets_list,
-        TFs_list,
-        TFs_indices,
-        Histone_marks_list,
-        Histone_marks_indices,
-        Chromatin_access_list,
-        Chromatin_access_indices,
-    ) = split_targets(targets_file_pth="target.names")
-
-    train_loader, valid_loader, test_loader, input_dim, output_dim = dataLR(
-        config=config
+    batch_size = config.train_params.get("batch_size")
+    lazy_loading = config.train_params.get("lazy_loading")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "zhihan1996/DNABERT-2-117M",
+        cache_dir=None,
+        model_max_length=150,
+        padding_side="right",
+        use_fast=True,
+        trust_remote_code=True,
     )
+    train_loader, valid_loader, test_loader = load_datasets(
+        batchSize=batch_size, test_split=0.1, output_dir="data", tokenizer=tokenizer
+    )
+
     if args.new:
-        model = LogisticRegression(input_dim, output_dim).to(device)
+        model = generate_FDNABert(
+            freeze_weights=True, model_path="zhihan1996/DNABERT-2-117M"
+        ).to(device)
         Udir = generate_UDir(path=config.paths.get("results_path"))
         model_folder_path = os.path.join(config.paths.get("results_path"), Udir)
         create_path(model_folder_path)
@@ -90,25 +89,19 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # Prepare the loss function
-    if output_dim == 1:
-        loss_function = torch.nn.BCEWithLogitsLoss()
-        activation_function = torch.nn.Sigmoid()
-    else:
-        loss_function = torch.nn.CrossEntropyLoss()
-        activation_function = torch.nn.Softmax(dim=1)
+    loss_function = torch.nn.CrossEntropyLoss(reduction="mean")
+    activation_function = torch.nn.Softmax(dim=1)
 
     # Train params
     max_epochs = config.train_params.get("max_epochs")
     counter_for_early_stop = config.train_params.get("counter_for_early_stop")
     epochs_to_check_loss = config.train_params.get("epochs_to_check_loss")
     batch_accumulation = config.train_params.get("batch_accumulation")
-    imbalanced_data = config.train_params.get("imbalanced_data")
     # Save train params in log file
     save_model_log(
         log_dir=model_folder_path,
         data_dictionary={
             "batch_accumulation": batch_accumulation,
-            "Imbalanced data": imbalanced_data,
             "learning_rate": learning_rate,
             "counter_for_early_stop": counter_for_early_stop,
             "epochs_to_check_loss": epochs_to_check_loss,
@@ -144,19 +137,3 @@ if __name__ == "__main__":
     }
     results_csv_path = os.path.join(config.paths.get("results_path"), "results.csv")
     save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)
-
-    weights = list(model.parameters())[0].cpu().detach().numpy()[0]
-    # Save weights distribution
-    plot_distribution(
-        weights=weights, file_path=os.path.join(model_folder_path, "Distribution.png")
-    )
-
-    # Save feature weights in a csv file
-    for target_list in [Sei_targets_list, TFs_list, Histone_marks_list]:
-        if len(target_list) == input_dim:
-            break
-    importance_csv_file = os.path.join(model_folder_path, "Importance_df.csv")
-    df = pd.DataFrame({"Target": target_list, "Weights": weights}).sort_values(
-        by="Weights", ascending=False
-    )
-    df.to_csv(importance_csv_file)

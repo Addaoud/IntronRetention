@@ -4,10 +4,14 @@ import torch
 import numpy as np
 from scipy.interpolate import splev
 from torch import einsum
+from transformers import AutoModel
+from src.seed import set_seed
+
+set_seed()
 
 
 class LogisticRegression(nn.Module):
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim: int, output_dim: int):
         super(LogisticRegression, self).__init__()
         self.linear = nn.Linear(input_dim, output_dim)
 
@@ -211,37 +215,84 @@ def generate_SEI():
     return net
 
 
+class AttentionPool(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.to_attn_logits = nn.Parameter(torch.eye(dim))  # 960*960
+
+    def forward(self, x):
+        attn_logits = einsum(
+            "b n d, d e -> b n e", x, self.to_attn_logits
+        )  # 64*16*960 , 960*960
+        attn = attn_logits.softmax(dim=-2)  # 64*1*16*960 => 64*1*16*960
+        return (x * attn).sum(dim=-2).squeeze(dim=-2)
+
+
+class finetuneblock(nn.Module):
+    def __init__(
+        self, hidden_dim: int, embed_dim: int, kernel_size: int, output_dim: int
+    ):
+        super().__init__()
+        self.project = nn.Sequential(
+            nn.Conv1d(hidden_dim, embed_dim, kernel_size=kernel_size),
+            nn.BatchNorm1d(embed_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.attention_pool = AttentionPool(embed_dim)
+        self.fcn = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim), nn.ReLU(inplace=True), nn.Dropout(p=0.1)
+        )
+        self.prediction_head = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x):
+        x = self.project(x)
+        x = x.permute(0, 2, 1)
+        x = self.attention_pool(x)
+        x = self.fcn(x)
+        x = self.prediction_head(x)
+        return x
+
+
 class FSei(nn.Module):
-    def __init__(self, FCNN=160, n_genomic_features=2):
+    def __init__(
+        self,
+        hidden_dim: int,
+        embed_dim: int,
+        kernel_size: int,
+        n_genomic_features: Optional[int] = 2,
+        FCNN: Optional[int] = 160,
+    ):
         """
         Parameters
         ----------
         FCNN : int
+        hidden_dim: int
+        embed_dim: int
+        kernel_size: int
         n_genomic_features : int
         """
-
         super(FSei, self).__init__()
         self.FCNN = FCNN
-        # self.Drop=nn.Dropout(p=0.2)
+        self.hidden_dim = hidden_dim
+        self.embed_dim = embed_dim
+        self.kernel_size = kernel_size
+        self.n_genomic_features = n_genomic_features
         self.max = nn.MaxPool1d(kernel_size=4, stride=4)
         self.lconv1 = nn.Sequential(
             nn.Conv1d(4, 3 * self.FCNN, kernel_size=9, padding=4),
             nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
         )
-
         self.conv1 = nn.Sequential(
             nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
             nn.Conv1d(3 * self.FCNN, 3 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
         )
-
         self.lconv2 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(3 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
             nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
         )
-
         self.conv2 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
@@ -249,13 +300,11 @@ class FSei(nn.Module):
             nn.Conv1d(4 * self.FCNN, 4 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
         )
-
         self.lconv3 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(4 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
             nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
         )
-
         self.conv3 = nn.Sequential(
             nn.Dropout(p=0.2),
             nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
@@ -263,7 +312,6 @@ class FSei(nn.Module):
             nn.Conv1d(6 * self.FCNN, 6 * self.FCNN, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
         )
-
         self.dconv1 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(
@@ -271,7 +319,6 @@ class FSei(nn.Module):
             ),
             nn.ReLU(inplace=True),
         )
-
         self.dconv2 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(
@@ -279,7 +326,6 @@ class FSei(nn.Module):
             ),
             nn.ReLU(inplace=True),
         )
-
         self.dconv3 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(
@@ -287,7 +333,6 @@ class FSei(nn.Module):
             ),
             nn.ReLU(inplace=True),
         )
-
         self.dconv4 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(
@@ -295,7 +340,6 @@ class FSei(nn.Module):
             ),
             nn.ReLU(inplace=True),
         )
-
         self.dconv5 = nn.Sequential(
             nn.Dropout(p=0.10),
             nn.Conv1d(
@@ -303,18 +347,22 @@ class FSei(nn.Module):
             ),
             nn.ReLU(inplace=True),
         )
-
         self._spline_df = 16
 
         self.spline_tr = nn.Sequential(
             BSplineTransformation(self._spline_df, scaled=False)
         )
+        self.classifier = finetuneblock(
+            hidden_dim=self.hidden_dim,
+            embed_dim=self.embed_dim,
+            kernel_size=self.kernel_size,
+            output_dim=self.n_genomic_features,
+        )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """
         Forward propagation of a batch.
         """
-        # Sei model
         lout1 = self.lconv1(x)
         out1 = self.conv1(lout1)
         lout2 = self.lconv2(self.max(out1 + lout1))
@@ -332,73 +380,99 @@ class FSei(nn.Module):
         dconv_out5 = self.dconv5(cat_out4)
         out = cat_out4 + dconv_out5
         spline_out = self.spline_tr(out)
-        return spline_out
-
-
-class AttentionPool(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.to_attn_logits = nn.Parameter(torch.eye(dim))  # 960*960
-
-    def forward(self, x):
-        attn_logits = einsum(
-            "b n d, d e -> b n e", x, self.to_attn_logits
-        )  # 64*16*960 , 960*960
-        attn = attn_logits.softmax(dim=-2)  # 64*1*16*960 => 64*1*16*960
-        return (x * attn).sum(dim=-2).squeeze()
-
-
-class finetunedmodel(nn.Module):
-    def __init__(self, pretrain_model, hidden_dim, embed_dim):
-        super().__init__()
-        self.pretrain_model = pretrain_model
-        self.project = nn.Sequential(
-            nn.Conv1d(hidden_dim, embed_dim, kernel_size=3),  # 16*960*4
-            nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True),
-        )
-        self.attention_pool = AttentionPool(embed_dim)
-        self.fcn = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim), nn.ReLU(inplace=True), nn.Dropout(p=0.2)
-        )
-        self.prediction_head = nn.Linear(embed_dim, 2)
-
-    def forward(self, x):
-        x = self.pretrain_model(x)
-        x = self.project(x)
-        x = x.permute(0, 2, 1)
-        x = self.attention_pool(x)
-        x = self.fcn(x)
-        x = self.prediction_head(x.squeeze())
-        return x
+        output = self.classifier(spline_out)
+        return output
 
 
 def generate_FSei(
     new_model: bool,
-    use_pretrain: bool,
-    freeze_weights: bool,
+    use_pretrain: Optional[bool] = False,
+    freeze_weights: Optional[bool] = False,
     model_path: Optional[str] = None,
 ):
+    hidden_dim = 960
+    embed_dim = 520
+    kernel_size = 3
+    n_genomic_features = 2
+    FCNN = 160
     if new_model:
-        sei = FSei()
+        net = FSei(
+            hidden_dim=hidden_dim,
+            embed_dim=embed_dim,
+            kernel_size=kernel_size,
+            n_genomic_features=n_genomic_features,
+            FCNN=FCNN,
+        )
     else:
-        sei = torch.load(model_path)
+        net = torch.load(model_path)
     if use_pretrain:
         model_pretrained_dict = torch.load("sei.pth")
         keys_pretrained = list(model_pretrained_dict.keys())[:34]
-        keys_net = list(sei.state_dict())[:34]
-        model_weights = sei.state_dict()
+        keys_net = list(net.state_dict())[:34]
+        model_weights = net.state_dict()
         for i in range(len(keys_net)):
             model_weights[keys_net[i]] = model_pretrained_dict[keys_pretrained[i]]
-        sei.load_state_dict(model_weights)
+        net.load_state_dict(model_weights)
         if freeze_weights:
-            model_params = list(sei.parameters())
+            model_params = list(net.parameters())
             for i in range(len(keys_net)):
                 model_params[i].requires_grad = False
         print("Model succesfully loaded with pretrained weights")
-    hidden_dim = 960
+    return net
+
+
+class FDNABert(nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int,
+        embed_dim: int,
+        kernel_size: int,
+        n_genomic_features: int,
+    ):
+        super(FDNABert, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.embed_dim = embed_dim
+        self.kernel_size = kernel_size
+        self.n_genomic_features = n_genomic_features
+        self.pretrained_model = AutoModel.from_pretrained(
+            "zhihan1996/DNABERT-2-117M", trust_remote_code=True
+        )
+        self.pretrained_model.pooler = None
+        self.classifier = finetuneblock(
+            hidden_dim=self.hidden_dim,
+            embed_dim=self.embed_dim,
+            kernel_size=self.kernel_size,
+            output_dim=self.n_genomic_features,
+        )
+
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
+        embeddings = self.pretrained_model(input_ids, attention_mask=attention_mask)[0]
+        output = self.classifier(embeddings)
+        return output
+
+
+def generate_FDNABert(
+    freeze_weights: bool,
+    model_path: Optional[str] = None,
+):
+    hidden_dim = 150
     embed_dim = 520
-    net = finetunedmodel(sei, hidden_dim, embed_dim)
+    kernel_size = 16
+    net = FDNABert(
+        hidden_dim=hidden_dim,
+        embed_dim=embed_dim,
+        kernel_size=kernel_size,
+        n_genomic_features=2,
+    )
+    if freeze_weights:
+        model_params = list(net.parameters())
+        for i in range(135):
+            model_params[i].requires_grad = False
+    print("Model succesfully built")
     return net
 
 

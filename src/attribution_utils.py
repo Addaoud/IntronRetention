@@ -3,6 +3,7 @@ import torch
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy
 import random
 import seaborn as sns
 from operator import and_
@@ -148,10 +149,10 @@ def extract_seq(
 
 def mat_product(motif, hotencoded_DNAsequence, threshold=0.7):
     n = motif.shape[1]
-    for i in range(hotencoded_DNAsequence.shape[1] - n + 1):
-        score = np.multiply(motif, hotencoded_DNAsequence[:, i : i + n]).sum()
-        if score > threshold:
-            return True
+    if (
+        scipy.signal.convolve2d(hotencoded_DNAsequence, motif, mode="valid") > threshold
+    ).any():
+        return True
     return False
 
 

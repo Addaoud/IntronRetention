@@ -9,5 +9,9 @@ __pycache__
 .vscode
 sei.pth
 target.names
-data
-results
+data/
+results/
+logs/
+PWMs/
+tests/
+new_data/

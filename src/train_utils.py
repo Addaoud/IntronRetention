@@ -4,8 +4,11 @@ import os
 from sklearn import metrics
 from datetime import datetime
 from .utils import save_model_log, save_data_to_csv, plot_loss
+from .seed import set_seed
 from fastprogress import progress_bar
 from typing import List
+
+set_seed()
 
 
 def train_loop(
@@ -17,13 +20,19 @@ def train_loop(
     model.train()
     loss_per_epoch = 0
     for batch_idx, (data, target) in enumerate(dataloader):
-        data, target = data.to(device, dtype=torch.float), target.to(device)
-        pred = model(data)
+        if type(data) == dict:
+            data, target = {key: data[key].to(device) for key in data}, target.to(
+                device
+            )
+            pred = model(**data)
+        else:
+            data, target = data.to(device), target.to(device)
+            pred = model(data)
         loss = loss_fn(pred, target)
         # normalize loss to account for batch accumulation
         loss = loss / n_accumulated_batches
         loss.backward()
-        loss_per_epoch += loss.item()
+        loss_per_epoch += loss.item() * n_accumulated_batches
         # weights update
         if ((batch_idx + 1) % n_accumulated_batches == 0) or (
             batch_idx + 1 == len(dataloader)
@@ -41,8 +50,14 @@ def get_valid_loss(model, device, dataloader, loss_fn) -> float:
         model.eval()
         valid_loss = 0
         for batch_idx, (data, target) in enumerate(dataloader):
-            data, target = data.to(device, dtype=torch.float), target.to(device)
-            output = model(data)
+            if type(data) == dict:
+                data, target = {key: data[key].to(device) for key in data}, target.to(
+                    device
+                )
+                output = model(**data)
+            else:
+                data, target = data.to(device), target.to(device)
+                output = model(data)
             loss = loss_fn(output, target)
             valid_loss += loss.item()
     valid_loss /= batch_idx + 1
@@ -61,7 +76,7 @@ def train_model(
     epochs_to_check_loss: int,
     batch_accumulation: bool,
     results_path: str,
-):
+) -> str:
     """
     Train the model
     """
@@ -75,7 +90,7 @@ def train_model(
     start_time = datetime.now()
     model_path = os.path.join(
         results_path,
-        "model_{0}.pkl".format(start_time.strftime("%y_%m_%d:%H:%M")),
+        "model_{0}.pt".format(start_time.strftime("%y_%m_%d:%H:%M")),
     )
     loss_csv_path = os.path.join(
         results_path,
@@ -125,7 +140,7 @@ def train_model(
                     log_dir=results_path,
                     data_dictionary={"finished training on": end_time},
                 )
-                torch.save(model, model_path)
+                torch.save(model.state_dict(), model_path)
                 plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
                 return model_path
         save_data_to_csv(
@@ -141,7 +156,7 @@ def train_model(
         log_dir=results_path,
         data_dictionary={"finished training on": end_time},
     )
-    torch.save(model, model_path)
+    torch.save(model.state_dict(), model_path)
     plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
     return model_path
 
@@ -168,23 +183,25 @@ def evaluate_model(model, dataloader, activation_function, device):
     accuracy_list = []
     with torch.no_grad():
         model.eval()
-        for idx, (data, target) in enumerate(dataloader):
-            data, target = data.to(device, dtype=torch.float), target.numpy()
-            output = activation_function(model(data))
+        for _, (data, target) in enumerate(dataloader):
+            if type(data) == dict:
+                data = {key: data[key].to(device) for key in data}
+                output = activation_function(model(**data))
+            else:
+                data = data.to(device)
+                output = activation_function(model(data))
             preds = output.cpu().detach().numpy()
             if preds.shape[1] == 1:
                 auroc_list.append(metrics.roc_auc_score(target, preds))
-                amax = np.round(preds) == target
-                accuracy_list.append(sum(list(amax)) / len(target))
-                precision, recall, thresholds = metrics.precision_recall_curve(
-                    target, preds
-                )
+                amax = np.round(preds) == target.tolist()
+                accuracy_list.append(sum(list(amax)).item() / len(target))
+                precision, recall, _ = metrics.precision_recall_curve(target, preds)
                 auprc_list.append(np.mean(metrics.auc(recall, precision)))
             elif preds.shape[1] == 2:
                 auroc_list.append(metrics.roc_auc_score(target, preds[:, 1]))
-                amax = np.round(preds[:, 1]) == target
+                amax = np.round(preds[:, 1]) == target.tolist()
                 accuracy_list.append(sum(list(amax)).item() / len(target))
-                precision, recall, thresholds = metrics.precision_recall_curve(
+                precision, recall, _ = metrics.precision_recall_curve(
                     target, preds[:, 1]
                 )
                 auprc_list.append(np.mean(metrics.auc(recall, precision)))

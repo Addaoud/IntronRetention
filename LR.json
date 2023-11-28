@@ -10,7 +10,7 @@
     },
     "optimizer_params": {
       "optimizer": "adamw",
-      "learning_rate": 0.0001,
+      "learning_rate": 0.001,
       "weight_decay": 1e-05
     },
     "train_params": {
@@ -20,6 +20,6 @@
       "batch_size": 512,
       "counter_for_early_stop": 30,
       "epochs_to_check_loss": 10,
-      "batch_accumulation": false
+      "batch_accumulation": true
     }
 }
