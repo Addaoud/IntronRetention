@@ -60,7 +60,7 @@ if __name__ == "__main__":
     SEI = generate_SEI().to(device)
     batchSize = 216
     train_loader, valid_loader, test_loader = load_datasets(
-        batchSize=batchSize, test_split=0.1, output_dir="data", length_after_padding=4096
+        batchSize=batchSize, test_split=0.1, output_dir="data"
     )
     print("processing all targets")
     train_data_path = os.path.join(data_folder, "data_ALL_train.npy")

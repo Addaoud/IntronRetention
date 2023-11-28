@@ -1,8 +1,10 @@
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Optional, List
 import matplotlib.pyplot as plt
 import seaborn as sns
+from .seed import set_seed
 
 sns.set()
+set_seed()
 
 
 def plot_distribution(

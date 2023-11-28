@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Sequence, Dict
 import os
 import numpy as np
 import pandas as pd
@@ -7,6 +7,10 @@ from torch.utils.data import Dataset, DataLoader
 from torchsampler import ImbalancedDatasetSampler
 from torch.utils.data.sampler import SubsetRandomSampler
 from .utils import hot_encode_sequence
+from transformers import PreTrainedTokenizer
+from .seed import set_seed
+
+set_seed()
 
 
 def get_indices(
@@ -55,7 +59,7 @@ class datasetLR(Dataset):
         self.len = len(data)
 
     def __getitem__(self, index):
-        return self.data[index], self.target[index].float().reshape(
+        return self.data[index].float(), self.target[index].float().reshape(
             -1,
         )
 
@@ -103,34 +107,63 @@ class DatasetLoad(Dataset):
         fa_file: str,
         lazyLoad: Optional[bool] = False,
         length_after_padding: Optional[int] = 0,
+        tokenizer: Optional[PreTrainedTokenizer] = None,
     ):
-        self.DNAalphabet = {'A':'0', 'C':'1', 'G':'2', 'T':'3'}
-        df_path = df_path.split('.')[0] #just in case the user provide extension
-        self.df_all = pd.read_csv(df_path+'.txt',delimiter='\t',header=None)
-        self.df_seq = pd.read_csv(fa_file,header=None)
-        strand = self.df_seq[0][0][-3:] #can be (+) or (.) 
-        self.df_all['header'] = self.df_all.apply(lambda x: '>'+x[0]+':'+str(x[1])+'-'+str(x[2])+strand, axis=1)
-        self.df_seq_all = pd.concat([self.df_seq[::2].reset_index(drop=True), self.df_seq[1::2].reset_index(drop=True)], axis=1, sort=False)
-        self.df_seq_all.columns = ["header","sequence"]
-        self.df_seq_all['sequence'] = self.df_seq_all['sequence'].apply(lambda x: x.upper())
+        df_path = df_path.split(".")[0]  # just in case the user provide extension
+        self.df_all = pd.read_csv(df_path + ".txt", delimiter="\t", header=None)
+        self.df_seq = pd.read_csv(fa_file, header=None)
+        strand = self.df_seq[0][0][-3:]  # can be (+) or (.)
+        self.df_all["header"] = self.df_all.apply(
+            lambda x: ">" + x[0] + ":" + str(x[1]) + "-" + str(x[2]) + strand, axis=1
+        )
+        self.df_seq_all = pd.concat(
+            [
+                self.df_seq[::2].reset_index(drop=True),
+                self.df_seq[1::2].reset_index(drop=True),
+            ],
+            axis=1,
+            sort=False,
+        )
+        self.df_seq_all.columns = ["header", "sequence"]
+        self.df_seq_all["sequence"] = self.df_seq_all["sequence"].apply(
+            lambda x: x.upper()
+        )
         self.df_all.rename(columns={7: "label"}, inplace=True)
-        self.df_final = pd.merge(self.df_seq_all[['header',"sequence"]],self.df_all[['header','label']],on='header',how='inner')
+        self.df_final = pd.merge(
+            self.df_seq_all[["header", "sequence"]],
+            self.df_all[["header", "label"]],
+            on="header",
+            how="inner",
+        )
         self.df_final.drop_duplicates(inplace=True)
         self.df_final = self.df_final.reset_index()
+        self.seqs = self.df_final["sequence"].tolist()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
-        self.lazyLoad = lazyLoad
-        self.length_after_padding = length_after_padding
-        if not self.lazyLoad:
-            self.One_hot_Encoded_Tensors = []
-            for i in range(0, self.df_final.shape[0]):
-                X = self.df_final["sequence"][i]
-                self.One_hot_Encoded_Tensors.append(
-                    torch.tensor(
-                        hot_encode_sequence(
-                            sequence=X, length_after_padding=length_after_padding
+        self.tokenizer = tokenizer
+        if tokenizer != None:
+            tokenizer_output = self.tokenizer(
+                self.seqs,
+                return_tensors="pt",
+                padding="longest",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            )
+            self.data = tokenizer_output["input_ids"]
+            self.attention_mask = tokenizer_output["attention_mask"]
+        else:
+            self.lazyLoad = lazyLoad
+            self.length_after_padding = length_after_padding
+            if not self.lazyLoad:
+                self.data = []
+                for i in range(0, self.df_final.shape[0]):
+                    self.data.append(
+                        torch.tensor(
+                            hot_encode_sequence(
+                                sequence=self.seqs[i],
+                                length_after_padding=length_after_padding,
+                            )
                         )
                     )
-                )
 
     def __len__(self):
         return self.df_final.shape[0]
@@ -139,18 +172,27 @@ class DatasetLoad(Dataset):
         return self.df_final
 
     def __getitem__(self, idx):
-        if not self.lazyLoad:
-            return self.One_hot_Encoded_Tensors[idx], self.Label_Tensors[idx].long()
-        else:
+        if self.tokenizer != None:
             return (
-                torch.tensor(
-                    hot_encode_sequence(
-                        sequence=self.df_final["sequence"][idx],
-                        length_after_padding=self.length_after_padding,
-                    )
+                dict(
+                    input_ids=self.data[idx],
+                    attention_mask=self.data[idx].ne(self.tokenizer.pad_token_id),
                 ),
                 self.Label_Tensors[idx].long(),
             )
+        else:
+            if not self.lazyLoad:
+                return self.data[idx].float(), self.Label_Tensors[idx].long()
+            else:
+                return (
+                    torch.tensor(
+                        hot_encode_sequence(
+                            sequence=self.seqs[idx],
+                            length_after_padding=self.length_after_padding,
+                        )
+                    ).float(),
+                    self.Label_Tensors[idx].long(),
+                )
 
 
 def load_datasets(
@@ -159,13 +201,16 @@ def load_datasets(
     output_dir: str,
     lazyLoad: Optional[bool] = False,
     length_after_padding: Optional[int] = 0,
+    tokenizer: Optional[PreTrainedTokenizer] = None,
 ):
     """
     Loads and processes the data.
     """
     input_prefix = "data/Labelled_Data_IR_iDiffIR_corrected"
     fa_file = "data/data.fa"
-    final_dataset = DatasetLoad(input_prefix, fa_file, lazyLoad, length_after_padding)
+    final_dataset = DatasetLoad(
+        input_prefix, fa_file, lazyLoad, length_after_padding, tokenizer
+    )
     train_indices, valid_indices, test_indices = get_indices(
         len(final_dataset), test_split, output_dir
     )
