@@ -6,6 +6,7 @@ fine_tuned_SEI.ipynb
 Prepare numpy data.ipynb
 VirtualEnv
 __pycache__
+*.ipynb
 .vscode
 sei.pth
 target.names
