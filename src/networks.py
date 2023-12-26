@@ -4,7 +4,6 @@ import torch
 import numpy as np
 from scipy.interpolate import splev
 from torch import einsum
-from transformers import AutoModel
 from src.seed import set_seed
 
 set_seed()
@@ -15,8 +14,8 @@ class LogisticRegression(nn.Module):
         super(LogisticRegression, self).__init__()
         self.linear = nn.Linear(input_dim, output_dim)
 
-    def forward(self, x):
-        output = self.linear(x)
+    def forward(self, input: torch.Tensor):
+        output = self.linear(input)
         return output
 
 
@@ -84,7 +83,7 @@ class BSplineTransformation(nn.Module):
         self._scaled = scaled
         self._df = degrees_of_freedom
 
-    def forward(self, input):
+    def forward(self, input: torch.Tensor):
         if self._spline_tr is None:
             spatial_dim = input.size()[-1]
             self._spline_tr = spline_factory(spatial_dim, self._df, log=self._log)
@@ -176,11 +175,11 @@ class Sei(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, x):
+    def forward(self, input: torch.Tensor):
         """
         Forward propagation of a batch.
         """
-        lout1 = self.lconv1(x)
+        lout1 = self.lconv1(input)
         out1 = self.conv1(lout1)
         lout2 = self.lconv2(out1 + lout1)
         out2 = self.conv2(lout2)
@@ -216,11 +215,11 @@ def generate_SEI():
 
 
 class AttentionPool(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim: int):
         super().__init__()
         self.to_attn_logits = nn.Parameter(torch.eye(dim))  # 960*960
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         attn_logits = einsum(
             "b n d, d e -> b n e", x, self.to_attn_logits
         )  # 64*16*960 , 960*960
@@ -244,8 +243,8 @@ class finetuneblock(nn.Module):
         )
         self.prediction_head = nn.Linear(embed_dim, output_dim)
 
-    def forward(self, x):
-        x = self.project(x)
+    def forward(self, input):
+        x = self.project(input)
         x = x.permute(0, 2, 1)
         x = self.attention_pool(x)
         x = self.fcn(x)
@@ -359,11 +358,11 @@ class FSei(nn.Module):
             output_dim=self.n_genomic_features,
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, input: torch.Tensor):
         """
         Forward propagation of a batch.
         """
-        lout1 = self.lconv1(x)
+        lout1 = self.lconv1(input)
         out1 = self.conv1(lout1)
         lout2 = self.lconv2(self.max(out1 + lout1))
         out2 = self.conv2(lout2)
@@ -395,17 +394,17 @@ def generate_FSei(
     kernel_size = 3
     n_genomic_features = 2
     FCNN = 160
-    if new_model:
-        net = FSei(
-            hidden_dim=hidden_dim,
-            embed_dim=embed_dim,
-            kernel_size=kernel_size,
-            n_genomic_features=n_genomic_features,
-            FCNN=FCNN,
-        )
-    else:
-        net = torch.load(model_path)
-    if use_pretrain:
+    net = FSei(
+        hidden_dim=hidden_dim,
+        embed_dim=embed_dim,
+        kernel_size=kernel_size,
+        n_genomic_features=n_genomic_features,
+        FCNN=FCNN,
+    )
+    if not new_model and model_path != None:
+        print("loading model state")
+        net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    if use_pretrain and new_model:
         model_pretrained_dict = torch.load("sei.pth")
         keys_pretrained = list(model_pretrained_dict.keys())[:34]
         keys_net = list(net.state_dict())[:34]
@@ -417,62 +416,7 @@ def generate_FSei(
             model_params = list(net.parameters())
             for i in range(len(keys_net)):
                 model_params[i].requires_grad = False
-        print("Model succesfully loaded with pretrained weights")
-    return net
-
-
-class FDNABert(nn.Module):
-    def __init__(
-        self,
-        hidden_dim: int,
-        embed_dim: int,
-        kernel_size: int,
-        n_genomic_features: int,
-    ):
-        super(FDNABert, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.embed_dim = embed_dim
-        self.kernel_size = kernel_size
-        self.n_genomic_features = n_genomic_features
-        self.pretrained_model = AutoModel.from_pretrained(
-            "zhihan1996/DNABERT-2-117M", trust_remote_code=True
-        )
-        self.pretrained_model.pooler = None
-        self.classifier = finetuneblock(
-            hidden_dim=self.hidden_dim,
-            embed_dim=self.embed_dim,
-            kernel_size=self.kernel_size,
-            output_dim=self.n_genomic_features,
-        )
-
-    def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-    ):
-        embeddings = self.pretrained_model(input_ids, attention_mask=attention_mask)[0]
-        output = self.classifier(embeddings)
-        return output
-
-
-def generate_FDNABert(
-    freeze_weights: bool,
-    model_path: Optional[str] = None,
-):
-    hidden_dim = 150
-    embed_dim = 520
-    kernel_size = 16
-    net = FDNABert(
-        hidden_dim=hidden_dim,
-        embed_dim=embed_dim,
-        kernel_size=kernel_size,
-        n_genomic_features=2,
-    )
-    if freeze_weights:
-        model_params = list(net.parameters())
-        for i in range(135):
-            model_params[i].requires_grad = False
-    print("Model succesfully built")
+    print("Model succesfully loaded with pretrained weights")
     return net
 
 

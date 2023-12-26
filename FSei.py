@@ -75,7 +75,7 @@ if __name__ == "__main__":
         create_path(model_folder_path)
     else:
         model_folder_path = os.path.dirname(args.model_path)
-        model = torch.load(args.model_path).to(device)
+        model = generate_FSei(new_model=False, model_path=args.model_path).to(device)
 
     # prepare the optimizer
     learning_rate = config.optimizer_params.get("learning_rate", 0.001)

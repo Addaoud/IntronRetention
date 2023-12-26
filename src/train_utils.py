@@ -1,18 +1,22 @@
 import torch
 import numpy as np
 import os
-from sklearn import metrics
 from datetime import datetime
 from .utils import save_model_log, save_data_to_csv, plot_loss
 from .seed import set_seed
 from fastprogress import progress_bar
-from typing import List
+from typing import Optional
 
 set_seed()
 
 
 def train_loop(
-    device, model, dataloader, loss_fn, optimizer, n_accumulated_batches: int
+    device: str,
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.dataloader,
+    loss_fn: torch.nn.modules.loss,
+    optimizer: torch.optim,
+    n_accumulated_batches: int,
 ) -> float:
     """
     Executes a single epoch of training.
@@ -20,14 +24,8 @@ def train_loop(
     model.train()
     loss_per_epoch = 0
     for batch_idx, (data, target) in enumerate(dataloader):
-        if type(data) == dict:
-            data, target = {key: data[key].to(device) for key in data}, target.to(
-                device
-            )
-            pred = model(**data)
-        else:
-            data, target = data.to(device), target.to(device)
-            pred = model(data)
+        data, target = {key: data[key].to(device) for key in data}, target.to(device)
+        pred = model(**data)
         loss = loss_fn(pred, target)
         # normalize loss to account for batch accumulation
         loss = loss / n_accumulated_batches
@@ -42,7 +40,12 @@ def train_loop(
     return loss_per_epoch / (batch_idx + 1)
 
 
-def get_valid_loss(model, device, dataloader, loss_fn) -> float:
+def get_valid_loss(
+    model: torch.nn.Module,
+    device: str,
+    dataloader: torch.utils.data.dataloader,
+    loss_fn: torch.nn.modules.loss,
+) -> float:
     """
     get the average loss function on dataloader
     """
@@ -50,14 +53,10 @@ def get_valid_loss(model, device, dataloader, loss_fn) -> float:
         model.eval()
         valid_loss = 0
         for batch_idx, (data, target) in enumerate(dataloader):
-            if type(data) == dict:
-                data, target = {key: data[key].to(device) for key in data}, target.to(
-                    device
-                )
-                output = model(**data)
-            else:
-                data, target = data.to(device), target.to(device)
-                output = model(data)
+            data, target = {key: data[key].to(device) for key in data}, target.to(
+                device
+            )
+            output = model(**data)
             loss = loss_fn(output, target)
             valid_loss += loss.item()
     valid_loss /= batch_idx + 1
@@ -65,26 +64,24 @@ def get_valid_loss(model, device, dataloader, loss_fn) -> float:
 
 
 def train_model(
-    model,
-    optimizer,
-    loss_fn,
-    device,
-    max_epochs: int,
-    train_dataloader,
-    valid_loader,
-    counter_for_early_stop_threshold: int,
-    epochs_to_check_loss: int,
-    batch_accumulation: bool,
+    model: torch.nn.Module,
+    optimizer: torch.optim,
+    loss_fn: torch.nn.modules.loss,
+    device: str,
     results_path: str,
+    max_epochs: int,
+    train_dataloader: torch.utils.data.dataloader,
+    valid_loader: torch.utils.data.dataloader = None,
+    counter_for_early_stop_threshold: Optional[int] = 0,
+    epochs_to_check_loss: Optional[int] = 0,
+    batch_accumulation: Optional[bool] = False,
+    n_accumulated_batches: Optional[int] = 1,
 ) -> str:
     """
     Train the model
     """
-    if batch_accumulation:
+    if n_accumulated_batches > len(train_dataloader) or batch_accumulation:
         n_accumulated_batches = len(train_dataloader)
-    else:
-        n_accumulated_batches = 1
-
     best_valid_loss = np.inf
     counter_for_early_stop = 0
     start_time = datetime.now()
@@ -159,75 +156,3 @@ def train_model(
     torch.save(model.state_dict(), model_path)
     plot_loss(loss_csv_path=loss_csv_path, loss_path=loss_plot_path)
     return model_path
-
-
-def onehot_encode_labels(labels_list: List[int], num_labels: int):
-    """
-    creates one hot encoded labels, e.g. [0,1,2] => [ [1,0,0] , [0,1,0] , [0,0,1] ]
-    :param labels_list:
-        list containing the labels
-    :param num_labels:
-        number of unique labels
-    :return:
-        numpy array containing the one hot encoded labels list
-    """
-    return np.eye(num_labels)[labels_list]
-
-
-def evaluate_model(model, dataloader, activation_function, device):
-    """
-    evaluate the model on dataloader and return the accuracy, auroc, and auprc
-    """
-    auroc_list = []
-    auprc_list = []
-    accuracy_list = []
-    with torch.no_grad():
-        model.eval()
-        for _, (data, target) in enumerate(dataloader):
-            if type(data) == dict:
-                data = {key: data[key].to(device) for key in data}
-                output = activation_function(model(**data))
-            else:
-                data = data.to(device)
-                output = activation_function(model(data))
-            preds = output.cpu().detach().numpy()
-            if preds.shape[1] == 1:
-                auroc_list.append(metrics.roc_auc_score(target, preds))
-                amax = np.round(preds) == target.tolist()
-                accuracy_list.append(sum(list(amax)).item() / len(target))
-                precision, recall, _ = metrics.precision_recall_curve(target, preds)
-                auprc_list.append(np.mean(metrics.auc(recall, precision)))
-            elif preds.shape[1] == 2:
-                auroc_list.append(metrics.roc_auc_score(target, preds[:, 1]))
-                amax = np.round(preds[:, 1]) == target.tolist()
-                accuracy_list.append(sum(list(amax)).item() / len(target))
-                precision, recall, _ = metrics.precision_recall_curve(
-                    target, preds[:, 1]
-                )
-                auprc_list.append(np.mean(metrics.auc(recall, precision)))
-            else:
-                onehot_encoded_labels = onehot_encode_labels(
-                    target.tolist(), preds.shape[1]
-                )
-                for i in range(preds.shape[1]):
-                    auroc_list.append(
-                        metrics.roc_auc_score(onehot_encoded_labels[:, i], preds[:, i])
-                    )
-                    amax = preds[:, i].argmax(1) == onehot_encoded_labels[:, i]
-                    accuracy_list.append(sum(list(amax)).item() / len(target))
-                    auprc_list.append(
-                        np.mean(
-                            metrics.average_precision_score(
-                                onehot_encode_labels(target.tolist(), preds.shape[1]),
-                                preds,
-                                average="macro",
-                            )
-                        )
-                    )
-    auroc = np.mean(auroc_list)
-    auprc = np.mean(auprc_list)
-    accuracy = np.mean(accuracy_list)
-    print(f"accuracy is {accuracy}")
-    print(f"auroc is {auroc}")
-    print(f"auprc is {auprc}")
-    return (accuracy, auroc, auprc)
