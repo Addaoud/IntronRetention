@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Dict
+from typing import Optional, List
 import os
 import numpy as np
 import pandas as pd
@@ -9,7 +9,6 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from .utils import hot_encode_sequence
 from transformers import PreTrainedTokenizer
 from .seed import set_seed
-from dataclasses import dataclass
 
 set_seed()
 
@@ -109,12 +108,11 @@ class datasetLR(Dataset):
 class DatasetLoad(Dataset):
     def __init__(
         self,
-        df_path: str,
-        fa_file: str,
+        df_final: pd.DataFrame,
         lazyLoad: Optional[bool] = False,
         length_after_padding: Optional[int] = 0,
     ):
-        self.df_final = prepare_dataframe(df_path=df_path, fa_file=fa_file)
+        self.df_final = df_final
         self.seqs = self.df_final["sequence"].tolist()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
         self.lazyLoad = lazyLoad
@@ -160,11 +158,10 @@ class DatasetLoad(Dataset):
 class DatasetBert(Dataset):
     def __init__(
         self,
-        df_path: str,
-        fa_file: str,
+        df_final: pd.DataFrame,
         tokenizer: Optional[PreTrainedTokenizer] = None,
     ):
-        self.df_final = prepare_dataframe(df_path=df_path, fa_file=fa_file)
+        self.df_final = df_final
         self.seqs = self.df_final["sequence"].tolist()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
         self.tokenizer = tokenizer
@@ -187,13 +184,7 @@ class DatasetBert(Dataset):
         return self.df_final
 
     def __getitem__(self, idx):
-        return (
-            dict(
-                input_ids=self.data[idx],
-                attention_mask=self.attention_mask[idx],
-            ),
-            self.Label_Tensors[idx].long(),
-        )
+        return dict(input_ids=self.data[idx], labels=self.Label_Tensors[idx])
 
 
 def dataLR(config):
@@ -240,16 +231,12 @@ def load_datasets(
     """
     input_prefix = "data/Labelled_Data_IR_iDiffIR_corrected"
     fa_file = "data/data.fa"
-    if tokenizer == None:
-        final_dataset = DatasetLoad(
-            input_prefix, fa_file, lazyLoad, length_after_padding
-        )
-    else:
-        final_dataset = DatasetBert(input_prefix, fa_file, tokenizer)
+    final_dataset = prepare_dataframe(df_path=input_prefix, fa_file=fa_file)
     train_indices, valid_indices, test_indices = get_indices(
         len(final_dataset), test_split, output_dir
     )
-    if return_loader:
+    if return_loader and tokenizer == None:
+        final_dataset = DatasetLoad(final_dataset, lazyLoad, length_after_padding)
         train_sampler = SubsetRandomSampler(train_indices)
         valid_sampler = SubsetRandomSampler(valid_indices)
         test_sampler = SubsetRandomSampler(test_indices)
@@ -264,28 +251,7 @@ def load_datasets(
         )
         return train_loader, valid_loader, test_loader
     else:
-        train_dataset = final_dataset.iloc[train_indices]
-        valid_dataset = final_dataset.iloc[valid_indices]
-        test_dataset = final_dataset.iloc[test_indices]
+        train_dataset = DatasetBert(final_dataset.iloc[train_indices], tokenizer)
+        valid_dataset = DatasetBert(final_dataset.iloc[valid_indices], tokenizer)
+        test_dataset = DatasetBert(final_dataset.iloc[test_indices], tokenizer)
         return train_dataset, valid_dataset, test_dataset
-
-
-@dataclass
-class DataCollatorForSupervisedDataset(object):
-    """Collate examples for supervised fine-tuning."""
-
-    tokenizer: PreTrainedTokenizer
-
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels = tuple(
-            [instance[key] for instance in instances] for key in ("input_ids", "labels")
-        )
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        )
-        labels = torch.Tensor(labels).long()
-        return dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-        )

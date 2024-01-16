@@ -111,10 +111,11 @@ def extract_seq(
     IGs = []
     Scores = []
     n_unique_sequences = 0
+    baseline = 0.25 * torch.ones((1, 4, 600)).to(device)
     with torch.no_grad():
         model.eval()
         integrated_gradients = IntegratedGradients(model)
-        for batch_idx, (seqs, data, target) in enumerate(progress_bar(data_loader)):
+        for _, (seqs, data, target) in enumerate(progress_bar(data_loader)):
             data = data.to(device, dtype=torch.float)
             outputs = model(data)
             softmax = torch.nn.Softmax(dim=1)
@@ -126,7 +127,10 @@ def extract_seq(
             if sum(indices) != 0:
                 n_unique_sequences += sum(indices)
                 attributions_ig = integrated_gradients.attribute(
-                    data[indices], target=relevant_target, n_steps=20
+                    data[indices],
+                    target=relevant_target,
+                    baselines=baseline,
+                    n_steps=20,
                 )
                 attributions_ig = attributions_ig.cpu().detach().numpy()
                 seqs = np.array(seqs)[indices]

@@ -1,0 +1,19 @@
+{
+    "paths": {
+      "results_path": "results/results_DNABert"
+    },
+    "optimizer_params": {
+      "optimizer": "adamw",
+      "learning_rate": 0.0001,
+      "weight_decay": 0.001
+    },
+    "train_params": {
+      "lazy_loading": false,
+      "max_epochs": 30,
+      "batch_size": 16,
+      "counter_for_early_stop": 6,
+      "epochs_to_check_loss": 1,
+      "batch_accumulation": false,
+      "n_accumulated_batches": 5
+    }
+}

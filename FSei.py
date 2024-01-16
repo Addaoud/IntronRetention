@@ -13,7 +13,8 @@ from src.utils import (
     split_targets,
     read_json,
 )
-from src.train_utils import train_model, evaluate_model
+from src.train_utils import train_model
+from src.results_utils import evaluate_model
 from src.dataset_utils import load_datasets
 from src.networks import generate_FSei
 from src.seed import set_seed
