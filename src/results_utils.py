@@ -4,7 +4,7 @@ import seaborn as sns
 import numpy as np
 import torch
 from sklearn import metrics
-from typing import List
+from fastprogress import progress_bar
 from .seed import set_seed
 
 sns.set()
@@ -29,28 +29,32 @@ def evaluate_model(
     dataloader: torch.utils.data.dataloader,
     activation_function: torch.nn.modules.loss,
     device: str,
+    return_details: Optional[bool] = False,
 ) -> tuple[float, float, float]:
     """
     evaluate the model on dataloader and return the accuracy, auroc, and auprc
     """
     target_list = list()
     preds_list = list()
+    print("Evaluating model")
     with torch.no_grad():
         model.eval()
-        for _, (data, target) in enumerate(dataloader):
+        for _, (data, target) in enumerate(progress_bar(dataloader)):
             data = {key: data[key].to(device) for key in data}
             output = activation_function(model(**data))
             preds = output.cpu().detach().numpy()
             target_list.extend(target)
             preds_list.extend(preds)
     if preds.shape[1] == 1:
-        auroc = metrics.roc_auc_score(target_list, preds_list)
+        fpr, tpr, _ = metrics.roc_curve(target_list, preds_list)
+        auroc = np.mean(metrics.auc(fpr, tpr))
         amax = np.round(preds_list) == target_list
         accuracy = sum(list(amax)).item() / len(target_list)
         precision, recall, _ = metrics.precision_recall_curve(target_list, preds_list)
         auprc = np.mean(metrics.auc(recall, precision))
     elif preds.shape[1] == 2:
-        auroc = metrics.roc_auc_score(target_list, np.array(preds_list)[:, 1])
+        fpr, tpr, _ = metrics.roc_curve(target_list, np.array(preds_list)[:, 1])
+        auroc = np.mean(metrics.auc(fpr, tpr))
         amax = np.round(np.array(preds_list)[:, 1]) == target_list
         accuracy = sum(list(amax)).item() / len(target_list)
         precision, recall, _ = metrics.precision_recall_curve(
@@ -71,15 +75,17 @@ def evaluate_model(
             accuracy_list.append(sum(list(amax)).item() / len(target_list))
         accuracy = np.mean(accuracy_list)
         auroc = np.mean(auroc_list)
-    auprc = metrics.average_precision_score(
-        onehot_encode_labels(target_list, preds.shape[1]),
-        np.array(preds_list),
-        average="macro",
-    )
+        auprc = metrics.average_precision_score(
+            onehot_encode_labels(target_list, preds.shape[1]),
+            np.array(preds_list),
+            average="macro",
+        )
 
     print(f"accuracy is {accuracy}")
     print(f"auroc is {auroc}")
     print(f"auprc is {auprc}")
+    if return_details:
+        return (accuracy, auroc, auprc, fpr, tpr, precision, recall)
     return (accuracy, auroc, auprc)
 
 
