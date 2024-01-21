@@ -416,7 +416,7 @@ def generate_FSei(
             model_params = list(net.parameters())
             for i in range(len(keys_net)):
                 model_params[i].requires_grad = False
-    print("Model succesfully loaded with pretrained weights")
+        print("Model succesfully built with pretrained weights")
     return net
 
 

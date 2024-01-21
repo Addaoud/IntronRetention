@@ -4,9 +4,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
-import random
 import seaborn as sns
 from operator import and_
+from .utils import hot_encode_sequence
 from fastprogress import progress_bar
 from captum.attr import IntegratedGradients
 
@@ -14,7 +14,7 @@ sns.set()
 
 
 class IGDataset(Dataset):
-    def __init__(self, df_path, fa_file, sampler, relevant_targets):
+    def __init__(self, df_path, fa_file, sampler, relevant_target):
         self.DNAalphabet = {"A": "0", "C": "1", "G": "2", "T": "3"}
         df_path = df_path.split(".")[0]  # just in case the user provide extension
         self.df_all = pd.read_csv(df_path + ".txt", delimiter="\t", header=None)
@@ -49,30 +49,17 @@ class IGDataset(Dataset):
         self.df_final.drop_duplicates(inplace=True)
 
         self.df_final = self.df_final.iloc[sampler, :]
-        self.df_final = self.df_final.loc[self.df_final.label.isin(relevant_targets)]
+        self.df_final = self.df_final.loc[self.df_final.label.isin([relevant_target])]
         self.df_final = self.df_final.reset_index()
         self.One_hot_Encoded_Tensors = []
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
-        for i in range(0, self.df_final.shape[0]):  # tqdm() before
-            X = self.df_final["sequence"][i]
-            X = X.replace(
-                "N", list(self.DNAalphabet.keys())[random.choice([0, 1, 2, 3])]
+        for i in range(0, self.df_final.shape[0]):
+            self.One_hot_Encoded_Tensors.append(
+                torch.tensor(hot_encode_sequence(sequence=self.df_final["sequence"][i]))
             )
-            X = X.replace("S", list(self.DNAalphabet.keys())[random.choice([1, 2])])
-            X = X.replace("W", list(self.DNAalphabet.keys())[random.choice([0, 3])])
-            X = X.replace("K", list(self.DNAalphabet.keys())[random.choice([2, 3])])
-            X = X.replace("Y", list(self.DNAalphabet.keys())[random.choice([1, 3])])
-            X = X.replace("R", list(self.DNAalphabet.keys())[random.choice([0, 2])])
-            X = X.replace("M", list(self.DNAalphabet.keys())[random.choice([0, 1])])
-            self.One_hot_Encoded_Tensors.append(torch.tensor(self.one_hot_encode(X)))
 
     def __len__(self):
         return self.df_final.shape[0]
-
-    def one_hot_encode(self, seq):
-        mapping = dict(zip("ACGT", range(4)))
-        seq2 = [mapping[i] for i in seq]
-        return np.eye(4)[seq2].T.astype(np.compat.long)
 
     def __getitem__(self, idx):
         return (
@@ -85,8 +72,13 @@ class IGDataset(Dataset):
 def motif_indices(IG_matrix, IG_window_size: int, IG_threshhold: float):
     l = IG_matrix.shape[-1]
     thresh = IG_matrix.max() * IG_threshhold
+    last_pos = 0
+    pad = int(IG_window_size / 3)
     for i in range(l - int(IG_window_size / 2)):
-        if IG_matrix[:, i + int(IG_window_size / 2)].max() > thresh:
+        if ((i - last_pos) > pad) and (
+            IG_matrix[:, i + int(IG_window_size / 2)].max() > thresh
+        ):
+            last_pos = i
             yield (i, IG_matrix[:, i + int(IG_window_size / 2)].max())
 
 
@@ -152,7 +144,6 @@ def extract_seq(
 
 
 def mat_product(motif, hotencoded_DNAsequence, threshold=0.7):
-    n = motif.shape[1]
     if (
         scipy.signal.convolve2d(hotencoded_DNAsequence, motif, mode="valid") > threshold
     ).any():

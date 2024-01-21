@@ -36,7 +36,7 @@ def parse_arguments(parser):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train and evaluate LR model")
+    parser = argparse.ArgumentParser(description="Train and evaluate FSei model")
     args = parse_arguments(parser)
     assert (
         args.json != None
