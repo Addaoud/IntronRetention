@@ -5,6 +5,7 @@ import numpy as np
 from scipy.interpolate import splev
 from torch import einsum
 from src.seed import set_seed
+from transformers import AutoModel
 
 set_seed()
 
@@ -402,7 +403,7 @@ def generate_FSei(
         FCNN=FCNN,
     )
     if not new_model and model_path != None:
-        print("loading model state")
+        print("Loading model state")
         net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
     if use_pretrain and new_model:
         model_pretrained_dict = torch.load("sei.pth")
@@ -417,6 +418,65 @@ def generate_FSei(
             for i in range(len(keys_net)):
                 model_params[i].requires_grad = False
         print("Model succesfully built with pretrained weights")
+    return net
+
+
+class FDNABert(nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int,
+        embed_dim: int,
+        kernel_size: int,
+        n_genomic_features: int,
+    ):
+        super(FDNABert, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.embed_dim = embed_dim
+        self.kernel_size = kernel_size
+        self.n_genomic_features = n_genomic_features
+        self.pretrained_model = AutoModel.from_pretrained(
+            "zhihan1996/DNABERT-2-117M", trust_remote_code=True
+        )
+        self.pretrained_model.pooler = None
+        self.classifier = finetuneblock(
+            hidden_dim=self.hidden_dim,
+            embed_dim=self.embed_dim,
+            kernel_size=self.kernel_size,
+            output_dim=self.n_genomic_features,
+        )
+
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
+        embeddings = self.pretrained_model(input_ids, attention_mask=attention_mask)[0]
+        output = self.classifier(embeddings)
+        return output
+
+
+def generate_FDNABert(
+    freeze_weights: bool,
+    model_path: Optional[str] = None,
+):
+    hidden_dim = 150
+    embed_dim = 520
+    kernel_size = 16
+    net = FDNABert(
+        hidden_dim=hidden_dim,
+        embed_dim=embed_dim,
+        kernel_size=kernel_size,
+        n_genomic_features=2,
+    )
+    if model_path != None:
+        print("Loading model state")
+        net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    if freeze_weights:
+        model_params = list(net.parameters())
+        for i in range(135):
+            model_params[i].requires_grad = False
+        print("Freezing model's pre-trained weights")
+    print("Model succesfully built")
     return net
 
 

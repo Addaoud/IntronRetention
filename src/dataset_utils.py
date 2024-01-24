@@ -168,7 +168,7 @@ class DatasetBert(Dataset):
         tokenizer_output = self.tokenizer(
             self.seqs,
             return_tensors="pt",
-            padding="longest",
+            padding="max_length",
             max_length=tokenizer.model_max_length,
             truncation=True,
         )
@@ -184,7 +184,10 @@ class DatasetBert(Dataset):
         return self.df_final
 
     def __getitem__(self, idx):
-        return dict(input_ids=self.data[idx], labels=self.Label_Tensors[idx])
+        return (
+            dict(input_ids=self.data[idx], attention_mask=self.attention_mask[idx]),
+            self.Label_Tensors[idx],
+        )
 
 
 def dataLR(config):
@@ -235,7 +238,7 @@ def load_datasets(
     train_indices, valid_indices, test_indices = get_indices(
         len(final_dataset), test_split, output_dir
     )
-    if return_loader and tokenizer == None:
+    if tokenizer == None:
         final_dataset = DatasetLoad(final_dataset, lazyLoad, length_after_padding)
         train_sampler = SubsetRandomSampler(train_indices)
         valid_sampler = SubsetRandomSampler(valid_indices)
@@ -254,4 +257,10 @@ def load_datasets(
         train_dataset = DatasetBert(final_dataset.iloc[train_indices], tokenizer)
         valid_dataset = DatasetBert(final_dataset.iloc[valid_indices], tokenizer)
         test_dataset = DatasetBert(final_dataset.iloc[test_indices], tokenizer)
-        return train_dataset, valid_dataset, test_dataset
+        if return_loader:
+            train_loader = DataLoader(train_dataset, batch_size=batchSize)
+            valid_loader = DataLoader(valid_dataset, batch_size=batchSize)
+            test_loader = DataLoader(test_dataset, batch_size=batchSize)
+            return train_loader, valid_loader, test_loader
+        else:
+            return train_dataset, valid_dataset, test_dataset
