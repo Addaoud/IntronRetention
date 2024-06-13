@@ -19,6 +19,8 @@ new_data/
 output/
 DNABert1.py
 Human_TF_MotifList_v_1.01.xlsx
-*.txt
+results_miscellaneous/
 qtls/
 miscellaneous
+submit.sh
+DNABert_tf.py
