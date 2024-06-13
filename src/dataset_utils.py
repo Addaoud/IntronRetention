@@ -5,9 +5,9 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchsampler import ImbalancedDatasetSampler
-from torch.utils.data.sampler import SubsetRandomSampler
 from .utils import hot_encode_sequence
 from transformers import PreTrainedTokenizer
+from Bio.Seq import reverse_complement
 from .seed import set_seed
 
 set_seed()
@@ -31,7 +31,6 @@ def get_indices(
         and os.path.exists(valid_indices_path)
         and os.path.exists(test_indices_path)
     ):
-        print("loading indices")
         train_indices = np.loadtxt(train_indices_path, dtype=int)
         valid_indices = np.loadtxt(valid_indices_path, dtype=int)
         test_indices = np.loadtxt(test_indices_path, dtype=int)
@@ -50,36 +49,6 @@ def get_indices(
         np.savetxt(valid_indices_path, valid_indices, fmt="%s")
         np.savetxt(test_indices_path, test_indices, fmt="%s")
     return train_indices, valid_indices, test_indices
-
-
-def prepare_dataframe(df_path: str, fa_file: str):
-    df_path = df_path.split(".")[0]  # just in case the user provide extension
-    df_all = pd.read_csv(df_path + ".txt", delimiter="\t", header=None)
-    df_seq = pd.read_csv(fa_file, header=None)
-    strand = df_seq[0][0][-3:]  # can be (+) or (.)
-    df_all["header"] = df_all.apply(
-        lambda x: ">" + x[0] + ":" + str(x[1]) + "-" + str(x[2]) + strand, axis=1
-    )
-    df_seq_all = pd.concat(
-        [
-            df_seq[::2].reset_index(drop=True),
-            df_seq[1::2].reset_index(drop=True),
-        ],
-        axis=1,
-        sort=False,
-    )
-    df_seq_all.columns = ["header", "sequence"]
-    df_seq_all["sequence"] = df_seq_all["sequence"].apply(lambda x: x.upper())
-    df_all.rename(columns={7: "label"}, inplace=True)
-    df_final = pd.merge(
-        df_seq_all[["header", "sequence"]],
-        df_all[["header", "label"]],
-        on="header",
-        how="inner",
-    )
-    df_final.drop_duplicates(inplace=True)
-    df_final = df_final.reset_index()
-    return df_final
 
 
 class datasetLR(Dataset):
@@ -109,10 +78,24 @@ class DatasetLoad(Dataset):
     def __init__(
         self,
         df_final: pd.DataFrame,
+        use_reverse_complement: Optional[bool] = False,
+        targets_for_reverse_complement: Optional[list[int]] = [1],
         lazyLoad: Optional[bool] = False,
         length_after_padding: Optional[int] = 0,
     ):
-        self.df_final = df_final
+        self.df_final = df_final.reset_index(drop=True)
+        if use_reverse_complement:
+            for (
+                idx,
+                row,
+            ) in self.df_final.loc[
+                self.df_final.label.isin(targets_for_reverse_complement)
+            ].iterrows():
+                self.df_final.loc[len(self.df_final.index)] = [
+                    row.header + "_r",
+                    reverse_complement(row.sequence),
+                    row.label,
+                ]
         self.seqs = self.df_final["sequence"].tolist()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
         self.lazyLoad = lazyLoad
@@ -159,23 +142,41 @@ class DatasetBert(Dataset):
     def __init__(
         self,
         df_final: pd.DataFrame,
+        use_reverse_complement: Optional[bool] = False,
+        targets_for_reverse_complement: Optional[list[int]] = [1],
         tokenizer: Optional[PreTrainedTokenizer] = None,
+        lazyLoad: Optional[bool] = False,
     ):
-        self.df_final = df_final
+        self.df_final = df_final.reset_index(drop=True)
+        self.lazyLoad = lazyLoad
+        if use_reverse_complement:
+            for (
+                idx,
+                row,
+            ) in self.df_final.loc[
+                self.df_final.label.isin(targets_for_reverse_complement)
+            ].iterrows():
+                self.df_final.loc[len(self.df_final.index)] = [
+                    row.header + "_r",
+                    reverse_complement(row.sequence),
+                    row.label,
+                ]
         self.seqs = self.df_final["sequence"].tolist()
         self.Label_Tensors = torch.tensor(self.df_final["label"].tolist())
         self.tokenizer = tokenizer
-        tokenizer_output = self.tokenizer(
-            self.seqs,
-            return_tensors="pt",
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        )
-        self.data = tokenizer_output["input_ids"]
-        self.attention_mask = tokenizer_output[
+        if not self.lazyLoad:
+            self.tokenizer_output = self.tokenizer(
+                self.seqs,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            )
+        self.data = self.tokenizer_output["input_ids"]
+        self.attention_mask = self.tokenizer_output[
             "attention_mask"
         ]  # self.data[idx].ne(self.tokenizer.pad_token_id) with pad_token_id=3
+        self.token_type_ids = self.tokenizer_output["token_type_ids"]
 
     def __len__(self):
         return self.df_final.shape[0]
@@ -184,26 +185,42 @@ class DatasetBert(Dataset):
         return self.df_final
 
     def __getitem__(self, idx):
-        return (
-            dict(input_ids=self.data[idx], attention_mask=self.attention_mask[idx]),
-            self.Label_Tensors[idx],
-        )
+        if not self.lazyLoad:
+            return (
+                dict(
+                    input_ids=self.data[idx],
+                    token_type_ids=self.token_type_ids[idx],
+                    attention_mask=self.attention_mask[idx],
+                ),
+                self.Label_Tensors[idx],
+            )
+        else:
+            return (
+                self.tokenizer(
+                    self.seqs[idx],
+                    return_tensors="pt",
+                    padding="max_length",
+                    max_length=self.tokenizer.model_max_length,
+                    truncation=True,
+                ),
+                self.Label_Tensors[idx],
+            )
 
 
 def dataLR(config):
-    train_data = np.load(config.paths.get("train_data"))
-    train_target = np.load(config.paths.get("train_target"))
-    valid_data = np.load(config.paths.get("valid_data"))
-    valid_target = np.load(config.paths.get("valid_target"))
-    test_data = np.load(config.paths.get("test_data"))
-    test_target = np.load(config.paths.get("test_target"))
+    train_data = np.load(config.train_data)
+    train_target = np.load(config.train_target)
+    valid_data = np.load(config.valid_data)
+    valid_target = np.load(config.valid_target)
+    test_data = np.load(config.test_data)
+    test_target = np.load(config.test_target)
     input_dim = train_data.shape[1]
     try:
         output_dim = train_target.shape[1]
     except:
         output_dim = 1
-    batch_size = config.train_params.get("batch_size")
-    imbalanced_data = config.train_params.get("imbalanced_data")
+    batch_size = config.batch_size
+    imbalanced_data = config.imbalanced_data
     Train_dataset = datasetLR(train_data, train_target)
     Valid_dataset = datasetLR(valid_data, valid_target)
     Test_dataset = datasetLR(test_data, test_target)
@@ -228,39 +245,107 @@ def load_datasets(
     length_after_padding: Optional[int] = 0,
     tokenizer: Optional[PreTrainedTokenizer] = None,
     return_loader: Optional[bool] = True,
+    use_reverse_complement: Optional[bool] = False,
+    targets_for_reverse_complement: Optional[list[int]] = [1],
 ):
     """
     Loads and processes the data.
     """
-    input_prefix = "data/Labelled_Data_IR_iDiffIR_corrected"
-    fa_file = "data/data.fa"
-    final_dataset = prepare_dataframe(df_path=input_prefix, fa_file=fa_file)
+    # input_prefix = "data/Labelled_Data_IR_iDiffIR_corrected"
+    # fa_file = "data/data.fa"
+    print("Loading indices and preparing the data")
+    final_dataset = pd.read_csv("data/final_data.csv")
     train_indices, valid_indices, test_indices = get_indices(
         len(final_dataset), test_split, output_dir
     )
     if tokenizer == None:
-        final_dataset = DatasetLoad(final_dataset, lazyLoad, length_after_padding)
-        train_sampler = SubsetRandomSampler(train_indices)
-        valid_sampler = SubsetRandomSampler(valid_indices)
-        test_sampler = SubsetRandomSampler(test_indices)
+        train_dataset = DatasetLoad(
+            final_dataset.iloc[train_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            lazyLoad,
+            length_after_padding,
+        )
+        valid_dataset = DatasetLoad(
+            final_dataset.iloc[valid_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            lazyLoad,
+            length_after_padding,
+        )
+        test_dataset = DatasetLoad(
+            final_dataset.iloc[test_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            lazyLoad,
+            length_after_padding,
+        )
         train_loader = DataLoader(
-            final_dataset, batch_size=batchSize, sampler=train_sampler
+            train_dataset,
+            batch_size=batchSize,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=6,
         )
         valid_loader = DataLoader(
-            final_dataset, batch_size=batchSize, sampler=valid_sampler
+            valid_dataset,
+            batch_size=batchSize,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=6,
         )
         test_loader = DataLoader(
-            final_dataset, batch_size=batchSize, sampler=test_sampler
+            test_dataset,
+            batch_size=batchSize,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=6,
         )
         return train_loader, valid_loader, test_loader
     else:
-        train_dataset = DatasetBert(final_dataset.iloc[train_indices], tokenizer)
-        valid_dataset = DatasetBert(final_dataset.iloc[valid_indices], tokenizer)
-        test_dataset = DatasetBert(final_dataset.iloc[test_indices], tokenizer)
+        train_dataset = DatasetBert(
+            final_dataset.iloc[train_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            tokenizer,
+            lazyLoad,
+        )
+        valid_dataset = DatasetBert(
+            final_dataset.iloc[valid_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            tokenizer,
+            lazyLoad,
+        )
+        test_dataset = DatasetBert(
+            final_dataset.iloc[test_indices],
+            use_reverse_complement,
+            targets_for_reverse_complement,
+            tokenizer,
+            lazyLoad,
+        )
         if return_loader:
-            train_loader = DataLoader(train_dataset, batch_size=batchSize)
-            valid_loader = DataLoader(valid_dataset, batch_size=batchSize)
-            test_loader = DataLoader(test_dataset, batch_size=batchSize)
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=batchSize,
+                shuffle=True,
+                pin_memory=True,
+                num_workers=6,
+            )
+            valid_loader = DataLoader(
+                valid_dataset,
+                batch_size=batchSize,
+                shuffle=True,
+                pin_memory=True,
+                num_workers=6,
+            )
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=batchSize,
+                shuffle=True,
+                pin_memory=True,
+                num_workers=6,
+            )
             return train_loader, valid_loader, test_loader
         else:
             return train_dataset, valid_dataset, test_dataset

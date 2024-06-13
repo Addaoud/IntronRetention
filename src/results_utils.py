@@ -7,7 +7,7 @@ from sklearn import metrics
 from fastprogress import progress_bar
 from .seed import set_seed
 
-sns.set()
+sns.set_theme()
 set_seed()
 
 

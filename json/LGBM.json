@@ -1,17 +1,13 @@
 {
-    "paths": {
-      "train_data": "/data/data_TF_train.npy",
-      "train_target": "/data/target_TF_train.npy",
-      "valid_data": "/data/data_TF_valid.npy",
-      "valid_target": "/data/target_TF_valid.npy",
-      "test_data": "/data/data_TF_test.npy",      
-      "test_target": "/data/target_TF_test.npy",
-      "results_path": "results/results_LGBM/only_TFs"
-    },
-    "train_params": {
-      "n_estimators": 1000,
-      "n_iters": 1500,
-      "early_stopping_round": 50,
-      "imbalanced_data": true
-    }
+  "train_data": "data/numpy_reverse_01/data_ALL_train.npy",
+  "train_target": "data/numpy_reverse_01/target_ALL_train.npy",
+  "valid_data": "data/numpy_reverse_01/data_ALL_valid.npy",
+  "valid_target": "data/numpy_reverse_01/target_ALL_valid.npy",
+  "test_data": "data/numpy_reverse_01/data_ALL_test.npy",
+  "test_target": "data/numpy_reverse_01/target_ALL_test.npy",
+  "results_path": "results/results_LGBM/ALL",
+  "n_estimators": 1000,
+  "n_iters": 1500,
+  "early_stopping_round": 50,
+  "imbalanced_data": true
 }

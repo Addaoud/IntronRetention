@@ -3,7 +3,6 @@ import pandas as pd
 import torch
 import os
 from fastprogress import progress_bar
-from torch.utils.data import DataLoader
 import seaborn as sns
 from prettytable import PrettyTable
 import argparse
@@ -12,215 +11,213 @@ import argparse
 from statsmodels.stats.proportion import proportions_ztest
 from statsmodels.stats.multitest import multipletests
 
-sns.set(font_scale=1.8)
-from src.attribution_utils import IGDataset, extract_seq, get_motif, mat_product
-from src.utils import hot_encode_sequence
-from src.networks import generate_FSei
+sns.set_theme(font_scale=1.8)
+from src.attribution_utils import (
+    get_IGdata,
+    extract_seq,
+    get_motif,
+    mat_product,
+    load_jaspar_database,
+)
+
+from src.utils import hot_encode_sequence, create_path, save_data_to_csv
+from src.networks import build_FSei
 from src.seed import set_seed
 
 set_seed()
-from typing import Optional
-
-
-def load_jaspar_database(jaspar_db_path: Optional[str] = "jaspar.meme.txt"):
-    tfs_data = open(jaspar_db_path).readlines()
-    motifs = dict()
-    matrix_data = False
-    key = None
-    binding_site_matrix = []
-    for line in tfs_data:
-        if line.startswith("MOTIF"):
-            key = " ".join(line.strip().split(" ")[1:])
-            binding_site_matrix = []
-        if line.startswith("URL"):
-            matrix_data = False
-            if len(binding_site_matrix) != 0:
-                motifs[key] = np.stack(binding_site_matrix, axis=1)
-                binding_site_matrix = []
-        if matrix_data:
-            vector = np.array(
-                [n.strip() for n in line.strip().split("  ")], dtype=float
-            )
-            binding_site_matrix.append(vector)
-            # motif += bp_dict[np.argmax(vector)]
-        if line.startswith("letter"):
-            matrix_data = True
-    return motifs
-
-
-def get_back_frequence():
-    df_path = "data/Labelled_Data_IR_iDiffIR_corrected"
-    fa_file = "data/data.fa"
-    df_path = df_path.split(".")[0]  # just in case the user provide extension
-    df_all = pd.read_csv(df_path + ".txt", delimiter="\t", header=None)
-    df_seq = pd.read_csv(fa_file, header=None)
-    strand = df_seq[0][0][-3:]  # can be (+) or (.)
-    df_all["header"] = df_all.apply(
-        lambda x: ">" + x[0] + ":" + str(x[1]) + "-" + str(x[2]) + strand, axis=1
-    )
-
-    df_seq_all = pd.concat(
-        [df_seq[::2].reset_index(drop=True), df_seq[1::2].reset_index(drop=True)],
-        axis=1,
-        sort=False,
-    )
-    df_seq_all.columns = ["header", "sequence"]
-    df_seq_all["sequence"] = df_seq_all["sequence"].apply(lambda x: x.upper())
-
-    df_all.rename(columns={7: "label"}, inplace=True)
-
-    df_final = pd.merge(
-        df_seq_all[["header", "sequence"]],
-        df_all[["header", "label"]],
-        on="header",
-        how="inner",
-    )
-    df_final.drop_duplicates(inplace=True)
-
-    DNAalphabet = {"A": 0, "C": 0, "G": 0, "T": 0}
-    for _, row in df_final.iterrows():
-        for nt in DNAalphabet.keys():
-            DNAalphabet[nt] = DNAalphabet[nt] + row.sequence.count(nt)
-    sum_nt = sum(DNAalphabet.values())
-    for nt in DNAalphabet.keys():
-        DNAalphabet[nt] = DNAalphabet[nt] / sum_nt
-    back_freq = np.array(list(DNAalphabet.values())).reshape(4, 1)
-    return back_freq, DNAalphabet
-
-
-def get_IGdata():
-    test_sampler = np.loadtxt("data/test_indices.txt", dtype=int)
-    valid_sampler = np.loadtxt("data/valid_indices.txt", dtype=int)
-    sampler = np.concatenate((test_sampler, valid_sampler))
-    df_path = "data/Labelled_Data_IR_iDiffIR_corrected"
-    fa_file = "data/data.fa"
-    IG_dataset_0 = IGDataset(
-        df_path=df_path,
-        fa_file=fa_file,
-        sampler=sampler,
-        relevant_target=0,
-    )
-    IG_loader_0 = DataLoader(IG_dataset_0, batch_size=32)
-    IG_dataset_1 = IGDataset(
-        df_path=df_path,
-        fa_file=fa_file,
-        sampler=sampler,
-        relevant_target=1,
-    )
-    IG_loader_1 = DataLoader(IG_dataset_1, batch_size=32)
-    return IG_loader_0, IG_loader_1
 
 
 def parse_arguments(parser):
+    parser.add_argument(
+        "-i", "--integrate", action="store_true", help="Run integrated gradients"
+    )
+    parser.add_argument(
+        "-b",
+        "--bind",
+        action="store_true",
+        help="Compare hot regions with TF binding sites",
+    )
+    parser.add_argument("-w", "--window", type=int, default=42, help="IG window size")
+    parser.add_argument(
+        "-t", "--threshold", type=float, default=0.7, help="IG threshold"
+    )
+    parser.add_argument(
+        "-p", "--prediction", type=float, default=0.7, help="Prediction threshold"
+    )
+    parser.add_argument(
+        "-d",
+        "--database",
+        type=str,
+        default="data/jaspar.meme.txt",
+        help="Jaspar database path",
+    )
     parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
     args = parser.parse_args()
     return args
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train and evaluate FSei model")
+    parser = argparse.ArgumentParser(
+        description="Run IG and compare hot regions with motifs in Jaspar database"
+    )
     args = parse_arguments(parser)
+    IG_window_size = args.window
+    IG_threshhold = args.threshold
     model_path = args.model_path
-    Udir_path = os.path.dirname(model_path)
+    result_path = os.path.join(os.path.dirname(model_path), "IG")
+    # Udir_path = os.path.dirname(model_path)
+    create_path(os.path.join(result_path, "Non_IR"))
+    create_path(os.path.join(result_path, "IR"))
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = generate_FSei(new_model=False, model_path=model_path).to(device)
-    IG_window_size = 48
-    IG_threshhold = 0.8
-    motifs = load_jaspar_database()
-    back_freq, DNAalphabet = get_back_frequence()
-    IG_loader_0, IG_loader_1 = get_IGdata()
-    print("Selecting sequence associated with non-IR")
-    seqs_0, IGs_0, Scores_0, n_unique_sequences_0 = extract_seq(
-        model, IG_loader_0, IG_window_size, IG_threshhold, 0, device
-    )
-    binding_sites_0 = {}
-    hot_encode_seqs_0 = []
-    for seq in seqs_0:
-        hot_encode_seqs_0.append(hot_encode_sequence(seq))
-    print("Counting motifs sites")
-    for tf in progress_bar(motifs.keys()):
-        if IG_window_size >= motifs[tf].shape[1]:
-            motif = motifs[tf]
-            pseudo_motif = np.where(motif == 0, 0.001, motif)
-            log_odd_motif = np.log(np.divide(pseudo_motif, back_freq))
-            max_motif_score = np.sum(np.max(log_odd_motif), axis=0)
-            for hot_encode in hot_encode_seqs_0:
-                if mat_product(
-                    log_odd_motif, hot_encode, threshold=0.8 * max_motif_score
-                ):
-                    binding_sites_0[tf] = binding_sites_0.get(tf, 0) + 1
-    binding_sites_sorted_0 = sorted(
-        binding_sites_0.items(), key=lambda x: x[1], reverse=True
-    )
-    converted_dict_0 = dict(binding_sites_sorted_0)
-    print("Selecting sequence associated IR")
-    seqs_1, IGs_1, Scores_1, n_unique_sequences_1 = extract_seq(
-        model, IG_loader_1, IG_window_size, IG_threshhold, 1, device
-    )
-    binding_sites_1 = {}
-    hot_encode_seqs_1 = []
-    for seq in seqs_1:
-        hot_encode_seqs_1.append(hot_encode_sequence(seq))
-    print("Counting motifs sites")
-    for tf in progress_bar(motifs.keys()):
-        if IG_window_size >= motifs[tf].shape[1]:
-            motif = motifs[tf]
-            pseudo_motif = np.where(motif == 0, 0.001, motif)
-            log_odd_motif = np.log(np.divide(pseudo_motif, back_freq))
-            max_motif_score = np.sum(np.max(log_odd_motif), axis=0)
-            for hot_encode in hot_encode_seqs_1:
-                if mat_product(
-                    log_odd_motif, hot_encode, threshold=0.7 * max_motif_score
-                ):
-                    binding_sites_1[tf] = binding_sites_1.get(tf, 0) + 1
+    model = build_FSei(new_model=False, model_path=model_path).to(device)
+    motifs = load_jaspar_database(jaspar_db_path=args.database)
+    IG_loader_Non_IR, IG_loader_IR, back_freq, DNAalphabet = get_IGdata()
+    if args.integrate:
+        print("Selecting sequences associated with non-IR")
+        (
+            headers_Non_IR,
+            positions_Non_IR,
+            sequences_Non_IR,
+            IGs_Non_IR,
+            Scores_Non_IR,
+        ) = extract_seq(
+            model, IG_loader_Non_IR, IG_window_size, IG_threshhold, 0, device
+        )
+        print()
+        print("Selecting sequences associated IR")
+        headers_IR, positions_IR, sequences_IR, IGs_IR, Scores_IR = extract_seq(
+            model, IG_loader_IR, IG_window_size, IG_threshhold, 1, device
+        )
+        print()
+        np.save(os.path.join(result_path, "Non_IR", "IGs.npy"), np.array(IGs_Non_IR))
+        np.save(os.path.join(result_path, "IR", "IGs.npy"), np.array(IGs_IR))
+        pd.DataFrame(
+            {
+                "Sequence id": [
+                    "sequence_" + str(i) for i in range(len(sequences_Non_IR))
+                ],
+                "Header": headers_Non_IR,
+                "Position": positions_Non_IR,
+                "Sequence": sequences_Non_IR,
+                "Score": Scores_Non_IR,
+            }
+        ).to_csv(os.path.join(result_path, "df_non_IR.csv"), index=False)
+        pd.DataFrame(
+            {
+                "Sequence id": ["sequence_" + str(i) for i in range(len(sequences_IR))],
+                "Header": headers_IR,
+                "Position": positions_IR,
+                "Sequence": sequences_IR,
+                "Score": Scores_IR,
+            }
+        ).to_csv(os.path.join(result_path, "df_IR.csv"), index=False)
+    if args.bind:
 
-    binding_sites_sorted_1 = sorted(
-        binding_sites_1.items(), key=lambda x: x[1], reverse=True
-    )
-    converted_dict_1 = dict(binding_sites_sorted_1)
-    prob_diff = dict()
-    for tf in list(set(converted_dict_0.keys()) | set(converted_dict_1.keys())):
-        prob_diff[tf] = int(converted_dict_1.get(tf, 0)) / len(seqs_1) - int(
-            converted_dict_0.get(tf, 0)
-        ) / len(seqs_0)
-    prob_diff = dict(sorted(prob_diff.items(), key=lambda item: item[1], reverse=True))
-    pvalue_dict = dict()
-    for idx, tf in enumerate(list(prob_diff.keys())):
-        # Define the counts and sample sizes for two groups
-        count_non_IR = int(
-            converted_dict_0.get(tf, 0)
-        )  # Number of successes in group 1
-        count_IR = int(converted_dict_1.get(tf, 0))  # Number of successes in group 2
-        z_score, p_value = proportions_ztest(
-            [count_non_IR, count_IR], [len(seqs_0), len(seqs_1)]
-        )
-        pvalue_dict[tf] = p_value
-    adjusted_pvalues = multipletests(list(pvalue_dict.values()), method="bonferroni")[1]
-    table = PrettyTable(["rank", "TF", "motif", "non-IR", "IR", "diff prob", "pvalue"])
-    for idx, tf in enumerate(list(prob_diff.keys())):
-        table.add_row(
+        binding_sites_Non_IR = dict()
+        binding_sites_IR = dict()
+        hot_encode_seqs_Non_IR = list()
+        hot_encode_seqs_IR = list()
+        messages = [
+            "Counting motifs hits associated with non-IR",
+            "Counting motifs hits associated with IR",
+        ]
+        for seqs, lis in zip(
+            [sequences_Non_IR, sequences_IR],
+            [hot_encode_seqs_Non_IR, hot_encode_seqs_IR],
+        ):
+            for seq in seqs:
+                lis.append(hot_encode_sequence(seq))
+
+        for hot_encoded_seqs, binding_sites, csv_file, message in zip(
+            [hot_encode_seqs_Non_IR, hot_encode_seqs_IR],
+            [binding_sites_Non_IR, binding_sites_IR],
             [
-                idx + 1,
-                tf,
-                get_motif(motifs[tf]),
-                converted_dict_0.get(tf, 0),
-                converted_dict_1.get(tf, 0),
-                round(prob_diff.get(tf), 3),
-                adjusted_pvalues[idx],
-            ]
+                os.path.join(result_path, "Non_IR", "hits.csv"),
+                os.path.join(result_path, "IR", "hits.csv"),
+            ],
+            messages,
+        ):
+            print(message)
+            for idx, hot_encode in enumerate(hot_encoded_seqs):
+                for tf in progress_bar(motifs.keys()):
+                    if IG_window_size >= motifs[tf].shape[1]:
+                        motif = motifs[tf]
+                        pseudo_motif = np.where(motif == 0, 0.001, motif)
+                        log_odd_motif = np.log(np.divide(pseudo_motif, back_freq))
+                        max_motif_score = np.sum(np.max(log_odd_motif), axis=0)
+                        if mat_product(
+                            log_odd_motif, hot_encode, threshold=0.8 * max_motif_score
+                        ):
+                            binding_sites[tf] = binding_sites.get(tf, 0) + 1
+                            save_data_to_csv(
+                                data_dictionary={
+                                    "Sequence": "sequence_" + str(idx),
+                                    "Motif": tf,
+                                },
+                                csv_file_path=csv_file,
+                            )
+            binding_sites = sorted(
+                binding_sites.items(), key=lambda x: x[1], reverse=True
+            )
+            print()
+
+        converted_dict_Non_IR = dict(binding_sites_Non_IR)
+        converted_dict_IR = dict(binding_sites_IR)
+        prob_diff = dict()
+        for tf in list(
+            set(converted_dict_Non_IR.keys()) | set(converted_dict_IR.keys())
+        ):
+            prob_diff[tf] = int(converted_dict_IR.get(tf, 0)) / len(sequences_IR) - int(
+                converted_dict_Non_IR.get(tf, 0)
+            ) / len(sequences_Non_IR)
+        prob_diff = dict(
+            sorted(prob_diff.items(), key=lambda item: item[1], reverse=True)
         )
-    results_file = os.path.join(Udir_path, "nsites.txt")
-    with open(results_file, "w", encoding="utf-8") as file:
-        file.write(
-            f"{len(IG_loader_0.dataset)} total sequences associated with non-IR \n"
+        pvalue_dict = dict()
+        for idx, tf in enumerate(list(prob_diff.keys())):
+            # Define the counts and sample sizes for two groups
+            count_non_IR = int(
+                converted_dict_Non_IR.get(tf, 0)
+            )  # Number of successes in group 1
+            count_IR = int(
+                converted_dict_IR.get(tf, 0)
+            )  # Number of successes in group 2
+            z_score, p_value = proportions_ztest(
+                [count_non_IR, count_IR], [len(sequences_Non_IR), len(sequences_IR)]
+            )
+            pvalue_dict[tf] = p_value
+        adjusted_pvalues = multipletests(
+            list(pvalue_dict.values()), method="bonferroni"
+        )[1]
+        table = PrettyTable(
+            ["rank", "TF", "motif", "non-IR", "IR", "diff prob", "pvalue"]
         )
-        file.write(f"{n_unique_sequences_0} sequences are selected by IG\n")
-        file.write(f"{len(seqs_0)} hot spots are selected\n")
-        file.write(f"{len(IG_loader_1.dataset)} total sequences associated with IR\n")
-        file.write(f"{n_unique_sequences_1} sequences are selected by IG\n")
-        file.write(f"{len(seqs_1)} hot spots are selected\n")
-        file.write(f"Background probabilities are: {DNAalphabet}\n")
-        file.write(table.get_string())
+        for idx, tf in enumerate(list(prob_diff.keys())):
+            table.add_row(
+                [
+                    idx + 1,
+                    tf,
+                    get_motif(motifs[tf]),
+                    converted_dict_Non_IR.get(tf, 0),
+                    converted_dict_IR.get(tf, 0),
+                    round(prob_diff.get(tf), 3),
+                    adjusted_pvalues[idx],
+                ]
+            )
+        results_file = os.path.join(result_path, "nsites.txt")
+        with open(results_file, "w", encoding="utf-8") as file:
+            file.write(
+                f"{len(IG_loader_Non_IR.dataset)} total sequences associated with non-IR \n"
+            )
+            file.write(f"{len(set(headers_Non_IR))} sequences are selected by IG\n")
+            file.write(f"{len(sequences_Non_IR)} hot spots are selected\n")
+            file.write(
+                f"{len(IG_loader_IR.dataset)} total sequences associated with IR\n"
+            )
+            file.write(f"{len(set(headers_IR))} sequences are selected by IG\n")
+            file.write(f"{len(sequences_IR)} hot spots are selected\n")
+            file.write(f"Background probabilities are: {DNAalphabet}\n")
+            file.write(table.get_string())
 
 
 if __name__ == "__main__":

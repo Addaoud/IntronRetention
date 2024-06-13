@@ -1,36 +1,61 @@
-import pandas as pd
 import argparse
 import os
 import seaborn as sns
 
-sns.set()
 import torch
 from src.utils import (
     create_path,
     save_model_log,
     save_data_to_csv,
     generate_UDir,
-    split_targets,
     read_json,
+    get_device,
 )
-from src.train_utils import train_model
+from src.train_utils import trainer
 from src.results_utils import evaluate_model
 from src.dataset_utils import load_datasets
-from src.networks import generate_FSei
+from src.networks import build_FSei
 from src.seed import set_seed
+from src.config import FSeiConfig
+from src.optimizers import ScheduledOptim
 
 set_seed()
+sns.set_theme()
 
 
 def parse_arguments(parser):
-    parser.add_argument("--json", type=str, help="path to the json file")
+    parser.add_argument("--json", type=str, help="Path to the json file")
     parser.add_argument(
         "-n",
         "--new",
         action="store_true",
         help="Build a new model",
     )
-    parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
+    parser.add_argument("-m", "--model", type=str, help="Existing model path")
+    parser.add_argument(
+        "-p",
+        "--pretrain",
+        action="store_true",
+        help="Load Sei pretrained weights",
+    )
+    parser.add_argument(
+        "-f",
+        "--freeze",
+        action="store_true",
+        help="Freeze Sei pretrained weights",
+    )
+    parser.add_argument(
+        "-t",
+        "--train",
+        action="store_true",
+        help="Train the model",
+    )
+    parser.add_argument(
+        "-e",
+        "--evaluate",
+        action="store_true",
+        help="Evaluate the model",
+    )
     args = parser.parse_args()
     return args
 
@@ -45,108 +70,78 @@ if __name__ == "__main__":
         args.json
     ), f"The path to the json file {args.json} does not exist. Please verify"
     assert (args.new == True) ^ (
-        (args.model_path) != None
+        (args.model) != None
     ), "Wrong arguments. Either include -n to build a new model or specify -m model_path"
 
-    config = read_json(json_path=args.json)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    config = FSeiConfig(**read_json(json_path=args.json))
+    config_dict = config.dict()
+    device = get_device()
+    config_dict["device"] = device
 
-    (
-        Sei_targets_list,
-        TFs_list,
-        TFs_indices,
-        Histone_marks_list,
-        Histone_marks_indices,
-        Chromatin_access_list,
-        Chromatin_access_indices,
-    ) = split_targets(targets_file_pth="target.names")
-
-    batch_size = config.train_params.get("batch_size")
-    lazy_loading = config.train_params.get("lazy_loading")
     train_loader, valid_loader, test_loader = load_datasets(
-        batchSize=batch_size, test_split=0.1, output_dir="data", lazyLoad=lazy_loading
+        batchSize=config.batch_size,
+        test_split=0.1,
+        output_dir=config.data_path,
+        lazyLoad=config.lazy_loading,
+        use_reverse_complement=config.use_reverse_complement,
+        targets_for_reverse_complement=config.targets_for_reverse_complement,
     )
 
     if args.new:
-        model = generate_FSei(
-            new_model=True, use_pretrain=True, freeze_weights=False
-        ).to(device)
-        Udir = generate_UDir(path=config.paths.get("results_path"))
-        model_folder_path = os.path.join(config.paths.get("results_path"), Udir)
+        Udir = generate_UDir(path=config.results_path)
+        model_folder_path = os.path.join(config.results_path, Udir)
         create_path(model_folder_path)
     else:
-        model_folder_path = os.path.dirname(args.model_path)
-        model = generate_FSei(new_model=False, model_path=args.model_path).to(device)
+        model_folder_path = os.path.dirname(args.model)
+        model_path = args.model
+    model = build_FSei(
+        new_model=args.new,
+        use_pretrain=args.pretrain,
+        freeze_weights=args.freeze,
+        model_path=args.model,
+    ).to(device)
 
     # prepare the optimizer
-    learning_rate = config.optimizer_params.get("learning_rate", 0.001)
-    weight_decay = config.optimizer_params.get("weight_decay", 0.01)
-    momentum = config.optimizer_params.get("momentum", 0)
-    optimizer = config.optimizer_params.get("optimizer", "ADAM")
-    if optimizer.upper() == "ADAMW":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
-    elif optimizer.upper() == "SGD":
-        optimizer = torch.optim.SGD(
-            model.parameters(), lr=learning_rate, momentum=momentum
-        )
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = ScheduledOptim(config)
+    optimizer(model.parameters())
 
     # Prepare the loss function
     loss_function = torch.nn.CrossEntropyLoss(reduction="mean")
     activation_function = torch.nn.Softmax(dim=1)
+    config_dict["loss_function"] = loss_function
+    config_dict["activation_function"] = activation_function
 
-    # Train params
-    max_epochs = config.train_params.get("max_epochs")
-    counter_for_early_stop = config.train_params.get("counter_for_early_stop")
-    epochs_to_check_loss = config.train_params.get("epochs_to_check_loss")
-    batch_accumulation = config.train_params.get("batch_accumulation")
-    # Save train params in log file
-    save_model_log(
-        log_dir=model_folder_path,
-        data_dictionary={
-            "device": device,
-            "batch_accumulation": batch_accumulation,
-            "optimizer": optimizer,
-            "learning_rate": learning_rate,
-            "weight_decay": weight_decay,
-            "momentum": momentum,
-            "loss_function": loss_function,
-            "activation_function": activation_function,
-            "counter_for_early_stop": counter_for_early_stop,
-            "epochs_to_check_loss": epochs_to_check_loss,
-            "batch_size": batch_size,
-        },
-    )
+    if args.train:
+        # Save train params in log file
+        save_model_log(log_dir=model_folder_path, data_dictionary=config_dict)
+        # Train model
+        trainer_ = trainer(
+            model=model,
+            loss_fn=loss_function,
+            device=device,
+            train_dataloader=train_loader,
+            valid_loader=valid_loader,
+            model_folder_path=model_folder_path,
+            optimizer=optimizer,
+            **config.dict(),
+        )
+        best_model, model_path = trainer_.train()
+        save_model_log(log_dir=model_folder_path, data_dictionary={})
 
-    model_path = train_model(
-        model=model,
-        optimizer=optimizer,
-        loss_fn=loss_function,
-        device=device,
-        max_epochs=max_epochs,
-        train_dataloader=train_loader,
-        valid_loader=valid_loader,
-        counter_for_early_stop_threshold=counter_for_early_stop,
-        epochs_to_check_loss=epochs_to_check_loss,
-        batch_accumulation=batch_accumulation,
-        results_path=model_folder_path,
-    )
-    save_model_log(log_dir=model_folder_path, data_dictionary={})
-
-    accuracy, auroc, auprc = evaluate_model(
-        model=model,
-        dataloader=test_loader,
-        activation_function=activation_function,
-        device=device,
-    )
-    data_dict = {
-        "path": model_path,
-        "accuracy": accuracy,
-        "auroc": auroc,
-        "auprc": auprc,
-    }
-    results_csv_path = os.path.join(config.paths.get("results_path"), "results.csv")
-    save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)
+    if args.evaluate:
+        # Evaluate model
+        accuracy, auroc, auprc = evaluate_model(
+            model=best_model,
+            dataloader=test_loader,
+            activation_function=activation_function,
+            device=device,
+        )
+        data_dict = {
+            "path": model_path,
+            "accuracy": accuracy,
+            "auroc": auroc,
+            "auprc": auprc,
+        }
+        results_csv_path = os.path.join(config.results_path, "results.csv")
+        # Save model performance
+        save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)

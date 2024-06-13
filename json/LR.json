@@ -1,25 +1,25 @@
 {
-    "paths": {
-      "train_data": "data/data_TF_train.npy",
-      "train_target": "data/target_TF_train.npy",
-      "valid_data": "data/data_TF_valid.npy",
-      "valid_target": "data/target_TF_valid.npy",
-      "test_data": "data/data_TF_test.npy",      
-      "test_target": "data/target_TF_test.npy",
-      "results_path": "results/results_LR/only_TFs"
-    },
-    "optimizer_params": {
-      "optimizer": "adamw",
-      "learning_rate": 0.001,
-      "weight_decay": 1e-05
-    },
-    "train_params": {
-      "lazy_loading": false,
-      "imbalanced_data": true,
-      "max_epochs": 3000,
-      "batch_size": 512,
-      "counter_for_early_stop": 30,
-      "epochs_to_check_loss": 10,
-      "batch_accumulation": true
-    }
+    "train_data": "data/numpy_reverse_01/data_ALL_train.npy",
+    "train_target": "data/numpy_reverse_01/target_ALL_train.npy",
+    "valid_data": "data/numpy_reverse_01/data_ALL_valid.npy",
+    "valid_target": "data/numpy_reverse_01/target_ALL_valid.npy",
+    "test_data": "data/numpy_reverse_01/data_ALL_test.npy",
+    "test_target": "data/numpy_reverse_01/target_ALL_test.npy",
+    "results_path": "results/results_LR/ALL",
+    "optimizer_type": "adamw",
+    "max_epochs": 1000,
+    "warmup_steps": 10,
+    "warmup_begin_lr": 0.0001,
+    "max_lr": 0.001,
+    "final_lr": 0.00001,
+    "use_scheduler": true,
+    "weight_decay": 0.01,
+    "momentum": 0.95,
+    "lazy_loading": false,
+    "imbalanced_data": false,
+    "batch_size": 512,
+    "counter_for_early_stop_threshold": 25,
+    "epochs_to_check_loss": 2,
+    "batch_accumulation": false,
+    "n_accumulated_batches": 1
 }

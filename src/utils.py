@@ -5,7 +5,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import random
 import numpy as np
+from torch import cuda
 import json
+from Bio import SeqIO
+
+
+def read_fasta_file(fasta_path: str, format: str = "fasta"):
+    for record in SeqIO.parse(fasta_path, format):
+        yield record.upper()
 
 
 def create_path(path: str) -> None:
@@ -15,14 +22,24 @@ def create_path(path: str) -> None:
     os.makedirs(name=path, exist_ok=True)
 
 
-class read_json:
+def read_json(json_path: str):
+    with open(json_path) as f:
+        data = json.load(f)
+    return data
+
+
+"""class read_json:
     def __init__(self, json_path: str):
-        """
-        Returns the content of the json file
-        """
+        #Returns the content of the json file
         with open(json_path) as f:
             data = json.load(f)
         self.__dict__.update(data)
+"""
+
+
+def get_device():
+    device = "cuda" if cuda.is_available() else "cpu"
+    return device
 
 
 def generate_UDir(path: str, UID_length: Optional[int] = 6) -> str:
@@ -188,7 +205,7 @@ def hot_encode_sequence(
         "N": [1, 1, 1, 1],
     }
     unambig_bases = {"A", "C", "G", "T"}
-    if (length_after_padding == 0) or (length_after_padding<len(sequence)):
+    if (length_after_padding == 0) or (length_after_padding < len(sequence)):
         hot_encoded_seq = np.zeros((4, len(sequence)), dtype=np.float32)
     else:
         hot_encoded_seq = np.zeros((4, length_after_padding), dtype=np.float32)
