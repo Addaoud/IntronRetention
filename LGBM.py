@@ -8,7 +8,7 @@ import pandas as pd
 import seaborn as sns
 from datetime import datetime
 
-sns.set()
+sns.set_theme()
 from src.utils import (
     create_path,
     save_model_log,
@@ -17,6 +17,7 @@ from src.utils import (
     split_targets,
     read_json,
 )
+from src.config import LGBMConfig
 from src.results_utils import plot_distribution
 from src.seed import set_seed
 
@@ -105,7 +106,8 @@ if __name__ == "__main__":
     assert (
         args.json != None
     ), "Please specify the path to the json file with --json json_path"
-    config = read_json(json_path=args.json)
+    config = LGBMConfig(**read_json(json_path=args.json))
+    config_dict = config.dict()
 
     (
         Sei_targets_list,
@@ -116,13 +118,14 @@ if __name__ == "__main__":
         Chromatin_access_list,
         Chromatin_access_indices,
     ) = split_targets(targets_file_pth="target.names")
-    train_data = np.load(config.data_paths.get("train_data"))
-    train_target = np.load(config.data_paths.get("train_target"))
-    valid_data = np.load(config.data_paths.get("valid_data"))
-    valid_target = np.load(config.data_paths.get("valid_target"))
-    test_data = np.load(config.data_paths.get("test_data"))
-    test_target = np.load(config.data_paths.get("test_target"))
-
+    print("Loading data")
+    train_data = np.load(config.train_data)
+    train_target = np.load(config.train_target)
+    valid_data = np.load(config.valid_data)
+    valid_target = np.load(config.valid_target)
+    test_data = np.load(config.test_data)
+    test_target = np.load(config.test_target)
+    print("Data loaded")
     if args.optimize:
         params = bayes_parameter_opt_lgb(
             train_data, train_target, init_round=10, opt_round=100, learning_rate=0.01
@@ -136,23 +139,26 @@ if __name__ == "__main__":
             "max_depth": -1,
             "num_leaves": 50,
             "bagging_freq": 1,
-            "early_stopping_round": 50,
-            "is_unbalance": True,
+            "early_stopping_round": config.early_stopping_round,
+            "is_unbalance": config.imbalanced_data,
             "device": "gpu",
             "gpu_platform_id": 0,
             "gpu_device_id": 0,
         }
 
-    n_estimators = 1000
+    n_estimators = config.n_estimators
     # laoding data
+    print("preparing data")
     lgb_train = lgb.Dataset(train_data, train_target)
     lgb_valid = lgb.Dataset(valid_data, valid_target)
-    Udir = generate_UDir(path=config.results_paths.get("results_path"))
-    model_folder_path = os.path.join(config.results_paths.get("results_path"), Udir)
+    print("data prepared")
+    Udir = generate_UDir(path=config.results_path)
+    model_folder_path = os.path.join(config.results_path, Udir)
     create_path(model_folder_path)
     save_model_log(log_dir=model_folder_path, data_dictionary=params)
     start_time = datetime.now()
-    model = lgb.train(params, lgb_train, n_estimators, lgb_valid)
+    print("start train")
+    model = lgb.train(params, lgb_train, config.n_estimators, lgb_valid)
     end_time = datetime.now()
     model.save_model(os.path.join(model_folder_path, "lgbm.txt"))
     data_dict = dict()
@@ -179,7 +185,7 @@ if __name__ == "__main__":
         if len(target_list) == train_data.shape[1]:
             break
     importance_csv_file = os.path.join(model_folder_path, "Importance_df.csv")
-    df = pd.DataFrame({"Target": TFs_list, "Importance": importances}).sort_values(
+    df = pd.DataFrame({"Target": target_list, "Importance": importances}).sort_values(
         by="Importance", ascending=False
     )
     df.to_csv(importance_csv_file)

@@ -20,3 +20,5 @@ output/
 DNABert1.py
 Human_TF_MotifList_v_1.01.xlsx
 *.txt
+qtls/
+miscellaneous

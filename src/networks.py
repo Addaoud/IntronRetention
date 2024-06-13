@@ -1,11 +1,11 @@
 import torch.nn as nn
-from typing import Optional
+from typing import Optional, Dict
 import torch
 import numpy as np
 from scipy.interpolate import splev
 from torch import einsum
 from src.seed import set_seed
-from transformers import AutoModel
+from transformers import BertModel, BertForSequenceClassification
 
 set_seed()
 
@@ -96,11 +96,10 @@ class BSplineTransformation(nn.Module):
 
 
 class Sei(nn.Module):
-    def __init__(self, sequence_length=600, n_genomic_features=21907):
+    def __init__(self, n_genomic_features=21907):
         """
         Parameters
         ----------
-        sequence_length : int
         n_genomic_features : int
         """
         super(Sei, self).__init__()
@@ -202,7 +201,7 @@ class Sei(nn.Module):
         return predict
 
 
-def generate_SEI():
+def build_SEI():
     net = Sei()
     model_pretrained_dict = torch.load("sei.pth")
     keys_pretrained = list(model_pretrained_dict.keys())
@@ -211,7 +210,7 @@ def generate_SEI():
     for i in range(len(keys_net)):
         model_weights[keys_net[i]] = model_pretrained_dict[keys_pretrained[i]]
     net.load_state_dict(model_weights)
-    print("Model succesfully loaded with pretrained weights")
+    print("Model loaded with pretrained weights")
     return net
 
 
@@ -228,6 +227,45 @@ class AttentionPool(nn.Module):
         return (x * attn).sum(dim=-2).squeeze(dim=-2)
 
 
+class finetuneblock1(nn.Module):
+    def __init__(
+        self,
+        input_channels: int,
+        kernel_size: int,
+        embed_dim: int,
+        feedforward_dim: int,
+        output_dim: int,
+    ):
+        super().__init__()
+        self.project = nn.Sequential(
+            nn.Conv1d(input_channels, embed_dim, kernel_size=kernel_size),
+            nn.BatchNorm1d(embed_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.attention_pool = AttentionPool(embed_dim)
+        # self.max = nn.MaxPool1d(kernel_size=)
+        self.linear1 = nn.Sequential(
+            nn.Linear(embed_dim, feedforward_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.2),
+        )
+        self.linear2 = nn.Sequential(
+            nn.Linear(feedforward_dim, embed_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.2),
+        )
+        self.prediction_head = nn.Linear(embed_dim, output_dim)
+
+    def forward(self, input):
+        x = self.project(input)
+        x = x.permute(0, 2, 1)
+        x = self.attention_pool(x)
+        x = self.linear1(x)
+        x = self.linear2(x)
+        x = self.prediction_head(x)
+        return x
+
+
 class finetuneblock(nn.Module):
     def __init__(
         self, hidden_dim: int, embed_dim: int, kernel_size: int, output_dim: int
@@ -240,7 +278,7 @@ class finetuneblock(nn.Module):
         )
         self.attention_pool = AttentionPool(embed_dim)
         self.fcn = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim), nn.ReLU(inplace=True), nn.Dropout(p=0.1)
+            nn.Linear(embed_dim, embed_dim), nn.ReLU(inplace=True), nn.Dropout(p=0.2)
         )
         self.prediction_head = nn.Linear(embed_dim, output_dim)
 
@@ -358,6 +396,11 @@ class FSei(nn.Module):
             kernel_size=self.kernel_size,
             output_dim=self.n_genomic_features,
         )
+        """self.classifier = nn.Sequential(
+            nn.Linear(960 * self._spline_df, n_genomic_features),
+            nn.ReLU(inplace=True),
+            nn.Linear(n_genomic_features, n_genomic_features),
+        )"""
 
     def forward(self, input: torch.Tensor):
         """
@@ -381,10 +424,12 @@ class FSei(nn.Module):
         out = cat_out4 + dconv_out5
         spline_out = self.spline_tr(out)
         output = self.classifier(spline_out)
+        """reshape_out = spline_out.view(spline_out.size(0), 960 * self._spline_df)
+        output = self.classifier(reshape_out)"""
         return output
 
 
-def generate_FSei(
+def build_FSei(
     new_model: bool,
     use_pretrain: Optional[bool] = False,
     freeze_weights: Optional[bool] = False,
@@ -395,6 +440,13 @@ def generate_FSei(
     kernel_size = 3
     n_genomic_features = 2
     FCNN = 160
+    """net = FSei(
+        hidden_dim=hidden_dim,
+        embed_dim=embed_dim,
+        kernel_size=kernel_size,
+        n_genomic_features=n_genomic_features,
+        FCNN=FCNN,
+    )"""
     net = FSei(
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
@@ -417,7 +469,7 @@ def generate_FSei(
             model_params = list(net.parameters())
             for i in range(len(keys_net)):
                 model_params[i].requires_grad = False
-        print("Model succesfully built with pretrained weights")
+        print("Model loaded with pretrained weights")
     return net
 
 
@@ -434,7 +486,7 @@ class FDNABert(nn.Module):
         self.embed_dim = embed_dim
         self.kernel_size = kernel_size
         self.n_genomic_features = n_genomic_features
-        self.pretrained_model = AutoModel.from_pretrained(
+        self.pretrained_model = BertModel.from_pretrained(
             "zhihan1996/DNABERT-2-117M", trust_remote_code=True
         )
         self.pretrained_model.pooler = None
@@ -447,15 +499,21 @@ class FDNABert(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor] = None,
+        input_ids: torch.Tensor = None,
+        token_type_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
     ):
-        embeddings = self.pretrained_model(input_ids, attention_mask=attention_mask)[0]
+        embeddings = self.pretrained_model(
+            input_ids=input_ids,
+            token_type_ids=token_type_ids,
+            attention_mask=attention_mask,
+        )[0]
         output = self.classifier(embeddings)
         return output
 
 
-def generate_FDNABert(
+def build_FDNABert(
+    new_model: bool,
     freeze_weights: bool,
     model_path: Optional[str] = None,
 ):
@@ -468,7 +526,50 @@ def generate_FDNABert(
         kernel_size=kernel_size,
         n_genomic_features=2,
     )
-    if model_path != None:
+    if not new_model and model_path != None:
+        print("Loading model state")
+        net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    if freeze_weights:
+        model_params = list(net.parameters())
+        for i in range(135):
+            model_params[i].requires_grad = False
+        print("Freezing model's pre-trained weights")
+    print("Model succesfully built")
+    return net
+
+
+class DNABERT2(nn.Module):
+    def __init__(self, n_genomic_features) -> None:
+        super(DNABERT2, self).__init__()
+        self.model = BertForSequenceClassification.from_pretrained(
+            "zhihan1996/DNABERT-2-117M",
+            cache_dir=None,
+            num_labels=n_genomic_features,
+            trust_remote_code=True,
+        )
+
+    def forward(
+        self,
+        input_ids: torch.Tensor = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
+        output = self.model(
+            input_ids=input_ids,
+            token_type_ids=token_type_ids,
+            attention_mask=attention_mask,
+        ).logits
+        return output
+
+
+def build_DNABert(
+    new_model: bool,
+    freeze_weights: bool,
+    model_path: Optional[str] = None,
+    n_genomic_features: Optional[int] = 2,
+):
+    net = DNABERT2(n_genomic_features=n_genomic_features)
+    if not new_model and model_path != None:
         print("Loading model state")
         net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
     if freeze_weights:
@@ -489,47 +590,35 @@ class Exponential(nn.Module):
 
 
 class Basset(nn.Module):
-    def __init__(self, params, wvmodel=None, useEmbeddings=False):
+    def __init__(self, model: Dict[str, int]):
         super(Basset, self).__init__()
-        self.CNN1filters = params["CNN1_filters"]
-        self.CNN1filterSize = params["CNN1_filtersize"]
-        self.CNN1poolSize = params["CNN1_poolsize"]
-        self.CNN1padding = params["CNN1_padding"]
-        self.CNN1useExponential = params["CNN1_useexponential"]
-        self.CNN2filters = params["CNN2_filters"]
-        self.CNN2filterSize = params["CNN2_filtersize"]
-        self.CNN2poolSize = params["CNN2_poolsize"]
-        self.CNN2padding = params["CNN2_padding"]
-        self.CNN3filters = params["CNN3_filters"]
-        self.CNN3filterSize = params["CNN3_filtersize"]
-        self.CNN3poolSize = params["CNN3_poolsize"]
-        self.CNN3padding = params["CNN3_padding"]
-        self.FC1inputSize = params["FC1_inputsize"]
-        self.FC1outputSize = params["FC1_outputsize"]
-        self.FC2outputSize = params["FC2_outputsize"]
-        self.numClasses = params["num_classes"]
-
-        self.useEmbeddings = useEmbeddings
-        if not self.useEmbeddings:
-            self.numInputChannels = params[
-                "input_channels"
-            ]  # number of channels, one hot encoding
-        else:
-            self.embSize = params["embd_size"]
-            weights = torch.FloatTensor(wvmodel.wv.vectors)
-            self.embedding = nn.Embedding.from_pretrained(weights, freeze=False)
-            self.numInputChannels = self.embSize
+        self.CNN1filters = model["CNN1filters"]
+        self.CNN1filterSize = model["CNN1filterSize"]
+        self.CNN1poolSize = model["CNN1poolSize"]
+        self.CNN1padding = model["CNN1padding"]
+        self.CNN2filters = model["CNN2filters"]
+        self.CNN2filterSize = model["CNN2filterSize"]
+        self.CNN2poolSize = model["CNN2poolSize"]
+        self.CNN2padding = model["CNN2padding"]
+        self.CNN3filters = model["CNN3filters"]
+        self.CNN3filterSize = model["CNN3filterSize"]
+        self.CNN3poolSize = model["CNN3poolSize"]
+        self.CNN3padding = model["CNN3padding"]
+        self.FC1inputSize = model["FC1inputSize"]
+        self.FC1outputSize = model["FC1outputSize"]
+        self.FC2outputSize = model["FC2outputSize"]
+        self.numClasses = model["numClasses"]
 
         self.layer1 = nn.Sequential(
             nn.Conv1d(
-                in_channels=self.numInputChannels,
+                in_channels=4,
                 out_channels=self.CNN1filters,
                 kernel_size=self.CNN1filterSize,
                 padding=self.CNN1padding,
                 bias=False,
             ),  # if using batchnorm, no need to use bias in a CNN
             nn.BatchNorm1d(num_features=self.CNN1filters),
-            nn.ReLU() if self.CNN1useExponential == False else Exponential(),
+            nn.ReLU(),
             nn.MaxPool1d(kernel_size=self.CNN1poolSize),
         )
         self.dropout1 = nn.Dropout(p=0.2)
@@ -577,13 +666,8 @@ class Basset(nn.Module):
             in_features=self.FC2outputSize, out_features=self.numClasses
         )
 
-    def forward(self, inputs):
-        if self.useEmbeddings:
-            output = self.embedding(inputs)
-            output = output.permute(0, 2, 1)
-        else:
-            output = inputs
-        output = self.layer1(output)
+    def forward(self, input):
+        output = self.layer1(input)
         output = self.dropout1(output)
         output = self.layer2(output)
         output = self.dropout2(output)
@@ -599,3 +683,179 @@ class Basset(nn.Module):
         output = self.fc3(output)
         assert not torch.isnan(output).any()
         return output
+
+
+class ConvNet(nn.Module):
+    def __init__(self, n_features: int):
+        super(ConvNet, self).__init__()
+        self.n_features = n_features
+        self.lconv_network = nn.Sequential(
+            nn.Conv1d(4, 480, kernel_size=11, padding=5),
+            nn.Conv1d(480, 480, kernel_size=7, padding=3),
+            nn.GELU(),
+            nn.MaxPool1d(kernel_size=16, stride=8),
+            nn.Conv1d(480, 640, kernel_size=5, padding=2, bias=False),
+            nn.BatchNorm1d(640),
+            nn.GELU(),
+            nn.Dropout(p=0.2),
+            nn.Conv1d(640, 640, kernel_size=7, padding=3),
+            nn.GELU(),
+            nn.MaxPool1d(kernel_size=8, stride=4),
+            nn.Conv1d(640, 720, kernel_size=5, padding=2, bias=False),
+            nn.BatchNorm1d(720),
+            nn.GELU(),
+            nn.Dropout(p=0.2),
+            nn.Conv1d(720, 720, kernel_size=7, padding=3),
+            nn.GELU(),
+            nn.MaxPool1d(kernel_size=4, stride=2),
+            nn.Conv1d(720, 960, kernel_size=5, padding=2, bias=False),
+            nn.BatchNorm1d(960),
+            nn.GELU(),
+            nn.Dropout(p=0.2),
+        )
+        self.dconv1 = nn.Sequential(
+            nn.Conv1d(960, 1280, kernel_size=5, dilation=2, padding=4, bias=False),
+            nn.BatchNorm1d(1280),
+            nn.GELU(),
+            nn.Conv1d(1280, 960, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm1d(960),
+            nn.Dropout(p=0.2),
+        )
+        self.dconv2 = nn.Sequential(
+            nn.Conv1d(960, 1280, kernel_size=5, dilation=4, padding=8, bias=False),
+            nn.BatchNorm1d(1280),
+            nn.GELU(),
+            nn.Conv1d(1280, 960, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm1d(960),
+            nn.Dropout(p=0.2),
+        )
+        self.dconv3 = nn.Sequential(
+            nn.Conv1d(960, 1280, kernel_size=5, dilation=8, padding=16, bias=False),
+            nn.BatchNorm1d(1280),
+            nn.GELU(),
+            nn.Conv1d(1280, 960, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm1d(960),
+            nn.Dropout(p=0.2),
+        )
+        self.gelu = nn.GELU()
+        self.classifier = finetuneblock1(
+            input_channels=960,
+            kernel_size=5,
+            embed_dim=1280,
+            feedforward_dim=2048,
+            output_dim=self.n_features,
+        )
+
+    def forward(self, input: torch.Tensor):
+        output1 = self.lconv_network(input)
+        output2 = self.dconv1(output1)
+        output3 = self.dconv2(self.gelu(output2 + output1))
+        output4 = self.dconv3(self.gelu(output3 + output2))
+        output = self.classifier(self.gelu(output3 + output4))
+        return output
+
+
+def build_ConvNet(
+    new_model: bool,
+    n_features: int,
+    model_path: Optional[str] = None,
+):
+    net = ConvNet(n_features=n_features)
+    if not new_model and model_path != None:
+        print("Loading model state")
+        net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    print("Model succesfully built")
+    return net
+
+
+class AttentionConv(nn.Module):
+    def __init__(self, n_features):
+        super(AttentionConv, self).__init__()
+
+        self.layer1 = nn.Sequential(
+            nn.Conv1d(
+                in_channels=4,
+                out_channels=480,
+                kernel_size=13,
+                padding=6,
+                bias=False,
+            ),
+            nn.BatchNorm1d(480),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=7, stride=7),
+        )
+        self.dropout1 = nn.Dropout(p=0.2)
+
+        self.layer2 = nn.Sequential(
+            nn.Conv1d(
+                in_channels=480,
+                out_channels=640,
+                kernel_size=7,
+                padding=3,
+                bias=False,
+            ),
+            nn.BatchNorm1d(num_features=640),
+            nn.ReLU(),
+        )
+        self.dropout2 = nn.Dropout(p=0.2)
+
+        self.layer3 = nn.Sequential(
+            nn.Conv1d(
+                in_channels=640,
+                out_channels=720,
+                kernel_size=5,
+                padding=2,
+                bias=False,
+            ),
+            nn.BatchNorm1d(720),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+        )
+        self.dropout3 = nn.Dropout(p=0.2)
+
+        self.attention = nn.MultiheadAttention(embed_dim=720, num_heads=10)
+        self.attndrop = nn.Dropout(p=0.2)
+        self.norm = nn.LayerNorm(720)
+
+        self.fc1 = nn.Linear(in_features=720, out_features=2048)
+        self.relu1 = nn.ReLU()
+        self.dropout4 = nn.Dropout(p=0.2)
+
+        self.fc2 = nn.Linear(in_features=2048, out_features=1024)
+        self.relu2 = nn.ReLU()
+        self.dropout5 = nn.Dropout(p=0.2)
+
+        self.fc3 = nn.Linear(in_features=1024, out_features=n_features)
+
+    def forward(self, input):
+        output = self.layer1(input)
+        output = self.dropout1(output)
+        output = self.layer2(output)
+        output = self.dropout2(output)
+        output = self.layer3(output)
+        output = self.dropout3(output)
+        output = output.transpose(2, 1)
+        att_output = self.attention(query=output, key=output, value=output)[0]
+        output = self.norm(self.attndrop(att_output) + output).max(dim=-2)[0]
+        # output = output.reshape(output.size(0), -1)
+        output = self.fc1(output)
+        output = self.relu1(output)
+        output = self.dropout4(output)
+        output = self.fc2(output)
+        output = self.relu2(output)
+        output = self.dropout5(output)
+        output = self.fc3(output)
+        return output
+
+
+def build_AttenConv(
+    new_model: bool,
+    n_features: int,
+    model_path: Optional[str] = None,
+):
+    net = AttentionConv(n_features=n_features)
+    if not new_model and model_path != None:
+        print("Loading model state")
+        net.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    print("Model succesfully built")
+    return net

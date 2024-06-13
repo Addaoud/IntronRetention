@@ -1,9 +1,9 @@
-import pandas as pd
 import argparse
 import os
-import seaborn as sns
+import os
 
-sns.set()
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import torch
 from src.utils import (
     create_path,
@@ -11,12 +11,15 @@ from src.utils import (
     save_data_to_csv,
     generate_UDir,
     read_json,
+    get_device,
 )
 from src.train_utils import train_model
 from src.results_utils import evaluate_model
 from src.dataset_utils import load_datasets
-from src.networks import generate_FDNABert
+from src.networks import build_FDNABert
+from src.config import DNABertConfig
 from transformers import AutoTokenizer
+from src.optimizers import ScheduledOptim
 
 
 def parse_arguments(parser):
@@ -26,6 +29,13 @@ def parse_arguments(parser):
         "--new",
         action="store_true",
         help="Build a new model",
+    )
+    parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
+    parser.add_argument(
+        "-f",
+        "--freeze",
+        action="store_true",
+        help="Freeze DNABert pretrained weights",
     )
     parser.add_argument(
         "-t",
@@ -39,7 +49,6 @@ def parse_arguments(parser):
         action="store_true",
         help="Evaluate the model",
     )
-    parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
     args = parser.parse_args()
     return args
 
@@ -59,11 +68,11 @@ if __name__ == "__main__":
     assert (
         args.train or args.model_path
     ), "You need to either set on the training mode with the argument '-t' or provide the model path."
-    config = read_json(json_path=args.json)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    config = DNABertConfig(**read_json(json_path=args.json))
+    config_dict = config.dict()
+    device = get_device()
+    config_dict["device"] = device
 
-    batch_size = config.train_params.get("batch_size")
-    lazy_loading = config.train_params.get("lazy_loading")
     tokenizer = AutoTokenizer.from_pretrained(
         "zhihan1996/DNABERT-2-117M",
         cache_dir=None,
@@ -73,74 +82,53 @@ if __name__ == "__main__":
         trust_remote_code=True,
     )
     train_loader, valid_loader, test_loader = load_datasets(
-        batchSize=batch_size, test_split=0.1, output_dir="data", tokenizer=tokenizer
+        batchSize=config.batch_size,
+        test_split=0.1,
+        output_dir=config.data_path,
+        tokenizer=tokenizer,
+        lazyLoad=config.lazy_loading,
+        use_reverse_complement=config.use_reverse_complement,
+        targets_for_reverse_complement=config.targets_for_reverse_complement,
     )
 
     if args.new:
-        Udir = generate_UDir(path=config.paths.get("results_path"))
-        model_folder_path = os.path.join(config.paths.get("results_path"), Udir)
+        Udir = generate_UDir(path=config.results_path)
+        model_folder_path = os.path.join(config.results_path, Udir)
         create_path(model_folder_path)
     else:
         model_folder_path = os.path.dirname(args.model_path)
-    model = generate_FDNABert(freeze_weights=False, model_path=args.model_path).to(
-        device
-    )
+    model = build_FDNABert(
+        new_model=args.new, freeze_weights=args.freeze, model_path=args.model_path
+    ).to(device)
+
     # prepare the optimizer
-    learning_rate = config.optimizer_params.get("learning_rate", 0.001)
-    weight_decay = config.optimizer_params.get("weight_decay", 0)
-    momentum = config.optimizer_params.get("momentum", 0)
-    optimizer = config.optimizer_params.get("optimizer", "ADAM")
-    if optimizer.upper() == "ADAMW":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
-    elif optimizer.upper() == "SGD":
-        optimizer = torch.optim.SGD(
-            model.parameters(), lr=learning_rate, momentum=momentum
-        )
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = ScheduledOptim(config)
+    optimizer(model.parameters())
 
     # Prepare the loss function
     loss_function = torch.nn.CrossEntropyLoss(reduction="mean")
     activation_function = torch.nn.Softmax(dim=1)
+    config_dict["loss_function"] = loss_function
+    config_dict["activation_function"] = activation_function
 
-    # Train params
-    max_epochs = config.train_params.get("max_epochs")
-    counter_for_early_stop = config.train_params.get("counter_for_early_stop")
-    epochs_to_check_loss = config.train_params.get("epochs_to_check_loss")
-    batch_accumulation = config.train_params.get("batch_accumulation")
     if args.train:
         # Save train params in log file
-        save_model_log(
-            log_dir=model_folder_path,
-            data_dictionary={
-                "device": device,
-                "batch_accumulation": batch_accumulation,
-                "optimizer": optimizer,
-                "learning_rate": learning_rate,
-                "weight_decay": weight_decay,
-                "momentum": momentum,
-                "loss_function": loss_function,
-                "activation_function": activation_function,
-                "counter_for_early_stop": counter_for_early_stop,
-                "epochs_to_check_loss": epochs_to_check_loss,
-                "batch_size": batch_size,
-            },
-        )
+        save_model_log(log_dir=model_folder_path, data_dictionary=config_dict)
 
         model_path = train_model(
             model=model,
             optimizer=optimizer,
             loss_fn=loss_function,
             device=device,
-            max_epochs=max_epochs,
+            max_epochs=config.max_epochs,
             train_dataloader=train_loader,
             valid_loader=valid_loader,
-            counter_for_early_stop_threshold=counter_for_early_stop,
-            epochs_to_check_loss=epochs_to_check_loss,
-            batch_accumulation=batch_accumulation,
+            counter_for_early_stop_threshold=config.counter_for_early_stop,
+            epochs_to_check_loss=config.epochs_to_check_loss,
+            batch_accumulation=config.batch_accumulation,
             results_path=model_folder_path,
+            n_accumulated_batches=config.n_accumulated_batches,
+            use_scheduler=config.use_scheduler,
         )
         save_model_log(log_dir=model_folder_path, data_dictionary={})
 
@@ -157,5 +145,5 @@ if __name__ == "__main__":
             "auroc": auroc,
             "auprc": auprc,
         }
-        results_csv_path = os.path.join(config.paths.get("results_path"), "results.csv")
+        results_csv_path = os.path.join(config.results_path, "results.csv")
         save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)

@@ -3,7 +3,7 @@ import argparse
 import os
 import seaborn as sns
 
-sns.set()
+sns.set_theme()
 import torch
 from src.utils import (
     create_path,
@@ -12,11 +12,14 @@ from src.utils import (
     generate_UDir,
     split_targets,
     read_json,
+    get_device,
 )
 from src.dataset_utils import dataLR
-from src.train_utils import train_model, evaluate_model
-from src.results_utils import plot_distribution
+from src.train_utils import trainer
+from src.results_utils import plot_distribution, evaluate_model
 from src.networks import LogisticRegression
+from src.config import LRConfig
+from src.optimizers import ScheduledOptim
 from src.seed import set_seed
 
 set_seed()
@@ -31,6 +34,18 @@ def parse_arguments(parser):
         help="Build a new logistic regression model",
     )
     parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
+    parser.add_argument(
+        "-t",
+        "--train",
+        action="store_true",
+        help="Train the model",
+    )
+    parser.add_argument(
+        "-e",
+        "--evaluate",
+        action="store_true",
+        help="Evaluate the model",
+    )
     args = parser.parse_args()
     return args
 
@@ -48,8 +63,10 @@ if __name__ == "__main__":
         (args.model_path) != None
     ), "Wrong arguments. Either include -n to build a new model or specify -m model_path"
 
-    config = read_json(json_path=args.json)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    config = LRConfig(**read_json(json_path=args.json))
+    config_dict = config.dict()
+    device = get_device()
+    config_dict["device"] = device
 
     (
         Sei_targets_list,
@@ -64,30 +81,19 @@ if __name__ == "__main__":
     train_loader, valid_loader, test_loader, input_dim, output_dim = dataLR(
         config=config
     )
+    model = LogisticRegression(input_dim, output_dim).to(device)
     if args.new:
-        model = LogisticRegression(input_dim, output_dim).to(device)
-        Udir = generate_UDir(path=config.paths.get("results_path"))
-        model_folder_path = os.path.join(config.paths.get("results_path"), Udir)
+        Udir = generate_UDir(path=config.results_path)
+        model_folder_path = os.path.join(config.results_path, Udir)
         create_path(model_folder_path)
     else:
-        model_folder_path = os.path.dirname(args.model_path)
-        model = torch.load(args.model_path).to(device)
+        model_path = args.model_path
+        model_folder_path = os.path.dirname(model_path)
+        model.load_state_dict(torch.load(model_path, map_location=torch.device(device)))
 
     # prepare the optimizer
-    learning_rate = config.optimizer_params.get("learning_rate", 0.001)
-    weight_decay = config.optimizer_params.get("weight_decay", 0.01)
-    momentum = config.optimizer_params.get("momentum", 0)
-    optimizer = config.optimizer_params.get("optimizer", "ADAM")
-    if optimizer.upper() == "ADAMW":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
-    elif optimizer.upper() == "SGD":
-        optimizer = torch.optim.SGD(
-            model.parameters(), lr=learning_rate, momentum=momentum
-        )
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = ScheduledOptim(config)
+    optimizer(model.parameters())
 
     # Prepare the loss function
     if output_dim == 1:
@@ -96,67 +102,56 @@ if __name__ == "__main__":
     else:
         loss_function = torch.nn.CrossEntropyLoss()
         activation_function = torch.nn.Softmax(dim=1)
+    config_dict["loss_function"] = loss_function
+    config_dict["activation_function"] = activation_function
 
-    # Train params
-    max_epochs = config.train_params.get("max_epochs")
-    counter_for_early_stop = config.train_params.get("counter_for_early_stop")
-    epochs_to_check_loss = config.train_params.get("epochs_to_check_loss")
-    batch_accumulation = config.train_params.get("batch_accumulation")
-    imbalanced_data = config.train_params.get("imbalanced_data")
-    # Save train params in log file
-    save_model_log(
-        log_dir=model_folder_path,
-        data_dictionary={
-            "batch_accumulation": batch_accumulation,
-            "Imbalanced data": imbalanced_data,
-            "learning_rate": learning_rate,
-            "counter_for_early_stop": counter_for_early_stop,
-            "epochs_to_check_loss": epochs_to_check_loss,
-        },
-    )
+    if args.train:
 
-    model_path = train_model(
-        model=model,
-        optimizer=optimizer,
-        loss_fn=loss_function,
-        device=device,
-        max_epochs=max_epochs,
-        train_dataloader=train_loader,
-        valid_loader=valid_loader,
-        counter_for_early_stop_threshold=counter_for_early_stop,
-        epochs_to_check_loss=epochs_to_check_loss,
-        batch_accumulation=batch_accumulation,
-        results_path=model_folder_path,
-    )
-    save_model_log(log_dir=model_folder_path, data_dictionary={})
+        # Save train params in log file
+        save_model_log(log_dir=model_folder_path, data_dictionary=config_dict)
 
-    accuracy, auroc, auprc = evaluate_model(
-        model=model,
-        dataloader=test_loader,
-        activation_function=activation_function,
-        device=device,
-    )
-    data_dict = {
-        "path": model_path,
-        "accuracy": accuracy,
-        "auroc": auroc,
-        "auprc": auprc,
-    }
-    results_csv_path = os.path.join(config.paths.get("results_path"), "results.csv")
-    save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)
+        trainer_ = trainer(
+            model=model,
+            loss_fn=loss_function,
+            device=device,
+            train_dataloader=train_loader,
+            valid_loader=valid_loader,
+            model_folder_path=model_folder_path,
+            optimizer=optimizer,
+            **config.dict(),
+        )
+        best_model, model_path = trainer_.train()
+        save_model_log(log_dir=model_folder_path, data_dictionary={})
 
-    weights = list(model.parameters())[0].cpu().detach().numpy()[0]
-    # Save weights distribution
-    plot_distribution(
-        weights=weights, file_path=os.path.join(model_folder_path, "Distribution.png")
-    )
+    if args.evaluate:
+        accuracy, auroc, auprc = evaluate_model(
+            model=best_model,
+            dataloader=test_loader,
+            activation_function=activation_function,
+            device=device,
+        )
+        data_dict = {
+            "path": model_path,
+            "accuracy": accuracy,
+            "auroc": auroc,
+            "auprc": auprc,
+        }
+        results_csv_path = os.path.join(config.results_path, "results.csv")
+        save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)
 
-    # Save feature weights in a csv file
-    for target_list in [Sei_targets_list, TFs_list, Histone_marks_list]:
-        if len(target_list) == input_dim:
-            break
-    importance_csv_file = os.path.join(model_folder_path, "Importance_df.csv")
-    df = pd.DataFrame({"Target": target_list, "Weights": weights}).sort_values(
-        by="Weights", ascending=False
-    )
-    df.to_csv(importance_csv_file)
+        # Save weights distribution
+        weights = list(best_model.parameters())[0].cpu().detach().numpy()[0]
+        plot_distribution(
+            weights=weights,
+            file_path=os.path.join(model_folder_path, "Distribution.png"),
+        )
+
+        # Save feature weights in a csv file
+        for target_list in [Sei_targets_list, TFs_list, Histone_marks_list]:
+            if len(target_list) == input_dim:
+                break
+        importance_csv_file = os.path.join(model_folder_path, "Importance_df.csv")
+        df = pd.DataFrame({"Target": target_list, "Weights": weights}).sort_values(
+            by="Weights", ascending=False
+        )
+        df.to_csv(importance_csv_file)
