@@ -18,9 +18,10 @@ from src.attribution_utils import (
     get_motif,
     mat_product,
     load_jaspar_database,
+    load_humans_tf_database,
 )
 
-from src.utils import hot_encode_sequence, create_path, save_data_to_csv
+from src.utils import hot_encode_sequence, create_path, save_data_to_csv, get_device
 from src.networks import build_FSei
 from src.seed import set_seed
 
@@ -37,7 +38,7 @@ def parse_arguments(parser):
         action="store_true",
         help="Compare hot regions with TF binding sites",
     )
-    parser.add_argument("-w", "--window", type=int, default=42, help="IG window size")
+    parser.add_argument("-w", "--window", type=int, default=32, help="IG window size")
     parser.add_argument(
         "-t", "--threshold", type=float, default=0.7, help="IG threshold"
     )
@@ -50,6 +51,20 @@ def parse_arguments(parser):
         type=str,
         default="data/jaspar.meme.txt",
         help="Jaspar database path",
+    )
+    parser.add_argument(
+        "-f",
+        "--pwm",
+        type=str,
+        default="data/PWMs",
+        help="Humans_tfs PWMs directory",
+    )
+    parser.add_argument(
+        "-r",
+        "--result",
+        type=str,
+        default="IG",
+        help="results_folder in existing model path",
     )
     parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
     args = parser.parse_args()
@@ -64,15 +79,30 @@ def main():
     IG_window_size = args.window
     IG_threshhold = args.threshold
     model_path = args.model_path
-    result_path = os.path.join(os.path.dirname(model_path), "IG")
+    result_path = os.path.join(os.path.dirname(model_path), args.result)
     # Udir_path = os.path.dirname(model_path)
     create_path(os.path.join(result_path, "Non_IR"))
     create_path(os.path.join(result_path, "IR"))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = build_FSei(new_model=False, model_path=model_path).to(device)
-    motifs = load_jaspar_database(jaspar_db_path=args.database)
+
+    if "jaspar" in args.database:
+        motifs = load_jaspar_database(jaspar_db_path=args.database)
+    else:
+        motifs = load_humans_tf_database(
+            humans_tf_db_path=args.database, pwms_path=args.pwm
+        )
     IG_loader_Non_IR, IG_loader_IR, back_freq, DNAalphabet = get_IGdata()
+
+    max_motif_scores = dict()
+    log_odd_motifs = dict()
+    for tf in motifs.keys():
+        pseudo_motif = np.where(motifs[tf] == 0, 10**-20, motifs[tf])
+        log_odd_motifs[tf] = np.log(np.divide(pseudo_motif, back_freq))
+    for tf in motifs.keys():
+        max_motif_scores[tf] = np.sum(np.max(motifs[tf]), axis=0)
+
     if args.integrate:
+        device = get_device()
+        model = build_FSei(new_model=False, model_path=model_path).to(device)
         print("Selecting sequences associated with non-IR")
         (
             headers_Non_IR,
@@ -111,6 +141,17 @@ def main():
                 "Score": Scores_IR,
             }
         ).to_csv(os.path.join(result_path, "df_IR.csv"), index=False)
+    else:
+        sequences_Non_IR = pd.read_csv(
+            os.path.join(result_path, "df_non_IR.csv")
+        ).Sequence.tolist()
+        headers_Non_IR = pd.read_csv(
+            os.path.join(result_path, "df_non_IR.csv")
+        ).Header.tolist()
+        sequences_IR = pd.read_csv(
+            os.path.join(result_path, "df_IR.csv")
+        ).Sequence.tolist()
+        headers_IR = pd.read_csv(os.path.join(result_path, "df_IR.csv")).Header.tolist()
     if args.bind:
 
         binding_sites_Non_IR = dict()
@@ -138,24 +179,24 @@ def main():
             messages,
         ):
             print(message)
-            for idx, hot_encode in enumerate(hot_encoded_seqs):
-                for tf in progress_bar(motifs.keys()):
+            # for idx, hot_encode in enumerate(progress_bar(hot_encoded_seqs)):
+            # for tf in motifs.keys():
+            for tf in progress_bar(motifs.keys()):
+                for idx, hot_encode in enumerate(hot_encoded_seqs):
                     if IG_window_size >= motifs[tf].shape[1]:
-                        motif = motifs[tf]
-                        pseudo_motif = np.where(motif == 0, 0.001, motif)
-                        log_odd_motif = np.log(np.divide(pseudo_motif, back_freq))
-                        max_motif_score = np.sum(np.max(log_odd_motif), axis=0)
                         if mat_product(
-                            log_odd_motif, hot_encode, threshold=0.8 * max_motif_score
+                            log_odd_motifs[tf],
+                            hot_encode,
+                            threshold=0.8 * max_motif_scores[tf],
                         ):
                             binding_sites[tf] = binding_sites.get(tf, 0) + 1
-                            save_data_to_csv(
+                            """save_data_to_csv(
                                 data_dictionary={
                                     "Sequence": "sequence_" + str(idx),
                                     "Motif": tf,
                                 },
                                 csv_file_path=csv_file,
-                            )
+                            )"""
             binding_sites = sorted(
                 binding_sites.items(), key=lambda x: x[1], reverse=True
             )

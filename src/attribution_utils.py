@@ -7,11 +7,12 @@ import scipy
 import seaborn as sns
 from operator import and_
 from Bio.Seq import reverse_complement
-from .utils import hot_encode_sequence
+from .utils import hot_encode_sequence, read_excel_csv_file
 from fastprogress import progress_bar
 from captum.attr import IntegratedGradients
 from typing import Optional
 from torch.utils.data import DataLoader
+import os
 
 sns.set_theme()
 
@@ -196,7 +197,7 @@ def get_motif(mat):
     return motif
 
 
-def load_jaspar_database(jaspar_db_path: Optional[str] = "jaspar.meme.txt"):
+def load_jaspar_database(jaspar_db_path: Optional[str] = "data/jaspar.meme.txt"):
     tfs_data = open(jaspar_db_path).readlines()
     motifs = dict()
     matrix_data = False
@@ -219,4 +220,34 @@ def load_jaspar_database(jaspar_db_path: Optional[str] = "jaspar.meme.txt"):
             # motif += bp_dict[np.argmax(vector)]
         if line.startswith("letter"):
             matrix_data = True
+    return motifs
+
+
+def load_humans_tf_database(
+    humans_tf_db_path: Optional[str] = "data/Human_TF_MotifList_v_1.01.xlsx",
+    pwms_path: Optional[str] = "data/PWMs",
+):
+    df = read_excel_csv_file(humans_tf_db_path)
+    df["HGNC (Motif ID)"] = (
+        df["HGNC symbol"].astype(str) + " (" + df["Motif ID"].astype(str) + ")"
+    )
+    motifs_mapping_dict = (
+        df[["CIS-BP ID", "HGNC (Motif ID)"]]
+        .drop_duplicates()
+        .set_index("CIS-BP ID")
+        .to_dict()["HGNC (Motif ID)"]
+    )
+    motifs = dict()
+    for file in os.listdir(pwms_path):
+        if file.endswith(".txt"):
+            with open(os.path.join(pwms_path, file)) as f:
+                tf_mat = list()
+                for line in f.readlines()[1:]:
+                    tf_mat.append(line.strip().split("\t")[1:])
+            try:
+                motifs[motifs_mapping_dict[file.strip(".txt")]] = np.stack(
+                    tf_mat, axis=1
+                ).astype(np.float32)
+            except:
+                continue
     return motifs
