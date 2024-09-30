@@ -21,7 +21,7 @@ from src.attribution_utils import (
     load_humans_tf_database,
 )
 
-from src.utils import hot_encode_sequence, create_path, save_data_to_csv, get_device
+from src.utils import hot_encode_sequence, create_path, get_device
 from src.networks import build_FSei
 from src.seed import set_seed
 
@@ -36,14 +36,28 @@ def parse_arguments(parser):
         "-b",
         "--bind",
         action="store_true",
-        help="Compare hot regions with TF binding sites",
-    )
-    parser.add_argument("-w", "--window", type=int, default=32, help="IG window size")
-    parser.add_argument(
-        "-t", "--threshold", type=float, default=0.7, help="IG threshold"
+        help="Compare hot regions with TF binding sites in the database",
     )
     parser.add_argument(
-        "-p", "--prediction", type=float, default=0.7, help="Prediction threshold"
+        "-w",
+        "--window",
+        type=int,
+        default=32,
+        help="Use this option to set the IG window size. Sequences of length IG window size centered around hot spots will be compared with TFs motifs.",
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        default=0.7,
+        help="Use this option to set the IG threshold. Only hot spots above this threshold will be selected to be compared with TFs motifs.",
+    )
+    parser.add_argument(
+        "-p",
+        "--prediction",
+        type=float,
+        default=0.7,
+        help="Use this option to set the prediction threshold. Only sequences correctly predicted above this threshold using the model will be selected",
     )
     parser.add_argument(
         "-d",
@@ -52,21 +66,7 @@ def parse_arguments(parser):
         default="data/jaspar.meme.txt",
         help="Jaspar database path",
     )
-    parser.add_argument(
-        "-f",
-        "--pwm",
-        type=str,
-        default="data/PWMs",
-        help="Humans_tfs PWMs directory",
-    )
-    parser.add_argument(
-        "-r",
-        "--result",
-        type=str,
-        default="IG",
-        help="results_folder in existing model path",
-    )
-    parser.add_argument("-m", "--model_path", type=str, help="Existing model path")
+    parser.add_argument("-m", "--model_path", type=str, help="FSei model path")
     args = parser.parse_args()
     return args
 
@@ -79,7 +79,7 @@ def main():
     IG_window_size = args.window
     IG_threshhold = args.threshold
     model_path = args.model_path
-    result_path = os.path.join(os.path.dirname(model_path), args.result)
+    result_path = os.path.join(os.path.dirname(model_path), "IG")
     # Udir_path = os.path.dirname(model_path)
     create_path(os.path.join(result_path, "Non_IR"))
     create_path(os.path.join(result_path, "IR"))
@@ -87,8 +87,9 @@ def main():
     if "jaspar" in args.database:
         motifs = load_jaspar_database(jaspar_db_path=args.database)
     else:
+        pwms_path = "data/PWMs"
         motifs = load_humans_tf_database(
-            humans_tf_db_path=args.database, pwms_path=args.pwm
+            humans_tf_db_path=args.database, pwms_path=pwms_path
         )
     IG_loader_Non_IR, IG_loader_IR, back_freq, DNAalphabet = get_IGdata()
 

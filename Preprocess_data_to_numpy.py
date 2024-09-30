@@ -84,8 +84,8 @@ if __name__ == "__main__":
         batchSize=batchSize,
         test_split=0.1,
         output_dir=data_folder,
-        length_after_padding=4000,
         use_reverse_complement=True,
+        targets_for_reverse_complement=[0, 1],
     )
     train_all_data_path = os.path.join(result_folder, "data_ALL_train.npy")
     train_all_target_path = os.path.join(result_folder, "target_ALL_train.npy")

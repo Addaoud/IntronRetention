@@ -29,33 +29,40 @@ def parse_arguments(parser):
         "-n",
         "--new",
         action="store_true",
-        help="Build a new model",
+        help="Use this option to build a new model",
     )
     parser.add_argument(
         "-f",
         "--freeze",
         action="store_true",
-        help="Freeze Sei pretrained weights",
+        help="Use this option to freeze DNABert-2 pretrained weights.",
     )
     parser.add_argument(
         "-t",
         "--train",
         action="store_true",
-        help="Train the model",
+        help="Use this option to train the model",
     )
     parser.add_argument(
         "-e",
         "--evaluate",
         action="store_true",
-        help="Evaluate the model",
+        help="Use this option to evaluate the model",
     )
-    parser.add_argument("-m", "--model", type=str, help="Existing model path")
+    parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        help="Use this option to load an existing model from model_path",
+    )
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train and evaluate LR model")
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate the DNABert2 model"
+    )
     args = parse_arguments(parser)
     assert (
         args.json != None

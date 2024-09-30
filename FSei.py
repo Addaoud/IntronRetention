@@ -29,39 +29,44 @@ def parse_arguments(parser):
         "-n",
         "--new",
         action="store_true",
-        help="Build a new model",
+        help="Use this option to build a new FSei model",
     )
-    parser.add_argument("-m", "--model", type=str, help="Existing model path")
+    parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        help="Use this option to load an existing FSei model from model_path",
+    )
     parser.add_argument(
         "-p",
         "--pretrain",
         action="store_true",
-        help="Load Sei pretrained weights",
+        help="Use this option to load Sei pretrained weights",
     )
     parser.add_argument(
         "-f",
         "--freeze",
         action="store_true",
-        help="Freeze Sei pretrained weights",
+        help="Use this option to freeze Sei pretrained weights. This option should be used with -p",
     )
     parser.add_argument(
         "-t",
         "--train",
         action="store_true",
-        help="Train the model",
+        help="Use this option to train the model",
     )
     parser.add_argument(
         "-e",
         "--evaluate",
         action="store_true",
-        help="Evaluate the model",
+        help="Use this option to evaluate the model",
     )
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train and evaluate FSei model")
+    parser = argparse.ArgumentParser(description="Train and evaluate the FSei model")
     args = parse_arguments(parser)
     assert (
         args.json != None

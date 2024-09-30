@@ -13,7 +13,7 @@ from src.utils import (
     read_json,
     get_device,
 )
-from src.train_utils import train_model
+from src.train_utils import trainer
 from src.results_utils import evaluate_model
 from src.dataset_utils import load_datasets
 from src.networks import build_FDNABert
@@ -114,22 +114,18 @@ if __name__ == "__main__":
     if args.train:
         # Save train params in log file
         save_model_log(log_dir=model_folder_path, data_dictionary=config_dict)
-
-        model_path = train_model(
+        # Train model
+        trainer_ = trainer(
             model=model,
-            optimizer=optimizer,
             loss_fn=loss_function,
             device=device,
-            max_epochs=config.max_epochs,
             train_dataloader=train_loader,
             valid_loader=valid_loader,
-            counter_for_early_stop_threshold=config.counter_for_early_stop,
-            epochs_to_check_loss=config.epochs_to_check_loss,
-            batch_accumulation=config.batch_accumulation,
-            results_path=model_folder_path,
-            n_accumulated_batches=config.n_accumulated_batches,
-            use_scheduler=config.use_scheduler,
+            model_folder_path=model_folder_path,
+            optimizer=optimizer,
+            **config.dict(),
         )
+        best_model, model_path = trainer_.train()
         save_model_log(log_dir=model_folder_path, data_dictionary={})
 
     if args.evaluate:

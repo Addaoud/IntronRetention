@@ -142,7 +142,7 @@ def split_targets(
     """
     Returns the list targets of the SEI framework, along with the list of TFs targets, non-TFs targets and their corresponding indices.
     """
-    Sei_targets_list = open(targets_file_pth, "r").readlines()
+    Sei_targets_list = open(targets_file_pth, "r").read().splitlines()
     TFs_list = list()
     TFs_indices = list()
     Histone_marks_list = list()

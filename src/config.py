@@ -138,10 +138,17 @@ class LRConfig:
 
 @dataclass
 class LGBMConfig:
-    n_estimators: int = (1000,)
-    n_iters: int = (1500,)
-    early_stopping_round: int = (50,)
-    imbalanced_data: bool = (False,)
+    n_estimators: int = 1000
+    num_leaves: int = 32
+    max_depth: int = 9
+    learning_rate: float = 0.01
+    reg_alpha: float = 1.0
+    reg_lambda: float = 1.0
+    feature_fraction: float = 1.0
+    bagging_fraction: float = 1.0
+    n_iters: int = 1500
+    early_stopping_round: int = 10
+    imbalanced_data: bool = False
     results_path: str = "results/results_LR/only_TFs"
     train_data: str = "data/numpy_no_reverse/data_TF_train.npy"
     train_target: str = "data/numpy_no_reverse/target_TF_train.npy"

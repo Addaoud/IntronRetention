@@ -24,59 +24,73 @@ from src.seed import set_seed
 set_seed()
 
 
-def bayes_parameter_opt_lgb(X, y, init_round=15, opt_round=25, learning_rate=0.01):
-    # prepare data
-    train_data = lgb.Dataset(data=X, label=y)
+def bayes_opt_lgb(train_data, init_round=15, opt_round=20):
 
     def lgb_eval(
+        n_estimators,
         num_leaves,
+        max_depth,
+        learning_rate,
+        reg_alpha,
+        reg_lambda,
         feature_fraction,
         bagging_fraction,
-        max_depth,
-        min_split_gain,
-        min_child_weight,
     ):
         params = {
             "boosting_type": "gbdt",
             "objective": "binary",
-            "bagging_freq": 1,
-            "min_child_samples": 20,
-            "reg_alpha": 1,
-            "reg_lambda": 1,
-            "boosting": "gbdt",
-            "learning_rate": learning_rate,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "verbosity": -1,
             "metric": "auc",
+            "is_unbalance": True,
+            "bagging_freq": 1,
+            "device": "gpu",
+            "gpu_device_id": 0,
+            "min_split_gain ": 0.001,
+            "verbosity": -1,
         }
         params["num_leaves"] = int(round(num_leaves))
+        params["learning_rate"] = float(learning_rate)
+        params["max_depth"] = int(round(max_depth))
+        params["reg_alpha"] = float(reg_alpha)
+        params["reg_lambda"] = float(reg_lambda)
         params["feature_fraction"] = max(min(feature_fraction, 1), 0)
         params["bagging_fraction"] = max(min(bagging_fraction, 1), 0)
-        params["max_depth"] = int(round(max_depth))
-        params["min_split_gain"] = min_split_gain
-        params["min_child_weight"] = min_child_weight
         cv_result = lgb.cv(
-            params, train_data, nfold=3, seed=6, stratified=False, verbose_eval=200
+            params,
+            train_data,
+            num_boost_round=int(round(n_estimators)),
+            nfold=3,
+            seed=42,
+            stratified=True,
+            shuffle=True,
+            metrics=["auc"],
         )
-        return (np.array(cv_result["auc"])).max()
+        return (np.array(cv_result["valid auc-mean"])).max()
 
     # parameters
     lgbBO = BayesianOptimization(
         lgb_eval,
         {
-            "num_leaves": (24, 45),
-            "feature_fraction": (0.1, 0.9),
-            "bagging_fraction": (0.8, 0.99),
-            "max_depth": (5, 9),
-            "min_split_gain": (0.001, 0.1),
-            "min_child_weight": (5, 50),
+            "n_estimators": (100, 1000),
+            "num_leaves": (20, 50),
+            "max_depth": (5, 25),
+            "learning_rate": (0.001, 0.1),
+            "reg_alpha": (0.0, 1.0),
+            "reg_lambda": (0.0, 1.0),
+            "feature_fraction": (0.5, 1.0),
+            "bagging_fraction": (0.5, 1.0),
         },
-        random_state=0,
+        random_state=42,
     )
     # optimize
     lgbBO.maximize(init_points=init_round, n_iter=opt_round)
-    return (max(lgbBO.res, key=lambda x: x["target"]))["params"]
+    return {
+        key: (
+            int(round(value))
+            if key in ["max_depth", "n_estimators", "num_leaves"]
+            else value
+        )
+        for key, value in lgbBO.max["params"].items()
+    }
 
 
 def evaluate_LGBM(model, data, target):
@@ -118,47 +132,53 @@ if __name__ == "__main__":
         Chromatin_access_list,
         Chromatin_access_indices,
     ) = split_targets(targets_file_pth="target.names")
-    print("Loading data")
+    print("Loading the data")
     train_data = np.load(config.train_data)
     train_target = np.load(config.train_target)
     valid_data = np.load(config.valid_data)
     valid_target = np.load(config.valid_target)
     test_data = np.load(config.test_data)
     test_target = np.load(config.test_target)
-    print("Data loaded")
-    if args.optimize:
-        params = bayes_parameter_opt_lgb(
-            train_data, train_target, init_round=10, opt_round=100, learning_rate=0.01
-        )
-    else:
-        params = {
-            "boosting_type": "gbdt",
-            "objective": "binary",
-            "metric": "auc",
-            "learning_rate": 0.01,
-            "max_depth": -1,
-            "num_leaves": 50,
-            "bagging_freq": 1,
-            "early_stopping_round": config.early_stopping_round,
-            "is_unbalance": config.imbalanced_data,
-            "device": "gpu",
-            "gpu_platform_id": 0,
-            "gpu_device_id": 0,
-        }
-
-    n_estimators = config.n_estimators
-    # laoding data
-    print("preparing data")
     lgb_train = lgb.Dataset(train_data, train_target)
     lgb_valid = lgb.Dataset(valid_data, valid_target)
-    print("data prepared")
+    params = {
+        "boosting_type": "gbdt",
+        "objective": "binary",
+        "metric": "auc",
+        "is_unbalance": True,
+        "bagging_freq": 1,
+        "device": "gpu",
+        "gpu_device_id": 0,
+        "verbosity": -1,
+        "min_split_gain ": 0.001,
+        "early_stopping_round": config.early_stopping_round,
+    }
+    if args.optimize:
+        print("Starting Bayesian optimization")
+        params.update(bayes_opt_lgb(lgb_train, init_round=30, opt_round=20))
+    else:
+        params.update(
+            {
+                "n_estimators": config.n_estimators,
+                "num_leaves": config.num_leaves,
+                "max_depth": config.max_depth,
+                "learning_rate": config.learning_rate,
+                "reg_alpha": config.reg_alpha,
+                "reg_lambda": config.reg_lambda,
+                "feature_fraction": config.feature_fraction,
+                "bagging_fraction": config.bagging_fraction,
+            }
+        )
+
+    # laoding data
     Udir = generate_UDir(path=config.results_path)
     model_folder_path = os.path.join(config.results_path, Udir)
     create_path(model_folder_path)
-    save_model_log(log_dir=model_folder_path, data_dictionary=params)
+    config_dict.update(params)
+    save_model_log(log_dir=model_folder_path, data_dictionary=config_dict)
+    print("Starting training")
     start_time = datetime.now()
-    print("start train")
-    model = lgb.train(params, lgb_train, config.n_estimators, lgb_valid)
+    model = lgb.train(params, lgb_train, valid_sets=lgb_valid)
     end_time = datetime.now()
     model.save_model(os.path.join(model_folder_path, "lgbm.txt"))
     data_dict = dict()
@@ -170,7 +190,7 @@ if __name__ == "__main__":
         model=model, data=test_data, target=test_target
     )
     data_dict = {"UID": Udir, "accuracy": accuracy, "auroc": auroc, "auprc": auprc}
-    results_csv_path = os.path.join(model_folder_path, "results.csv")
+    results_csv_path = os.path.join(config.results_path, "results.csv")
     save_data_to_csv(data_dictionary=data_dict, csv_file_path=results_csv_path)
 
     importances = model.feature_importance()

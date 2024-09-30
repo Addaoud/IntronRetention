@@ -397,9 +397,9 @@ class FSei(nn.Module):
             output_dim=self.n_genomic_features,
         )
         """self.classifier = nn.Sequential(
-            nn.Linear(960 * self._spline_df, n_genomic_features),
+            nn.Linear(960 * self._spline_df, self.hidden_dim),
             nn.ReLU(inplace=True),
-            nn.Linear(n_genomic_features, n_genomic_features),
+            nn.Linear(self.hidden_dim, n_genomic_features),
         )"""
 
     def forward(self, input: torch.Tensor):
@@ -424,8 +424,8 @@ class FSei(nn.Module):
         out = cat_out4 + dconv_out5
         spline_out = self.spline_tr(out)
         output = self.classifier(spline_out)
-        """reshape_out = spline_out.view(spline_out.size(0), 960 * self._spline_df)
-        output = self.classifier(reshape_out)"""
+        # reshape_out = spline_out.view(spline_out.size(0), 960 * self._spline_df)
+        # output = self.classifier(reshape_out)
         return output
 
 
@@ -440,13 +440,6 @@ def build_FSei(
     kernel_size = 3
     n_genomic_features = 2
     FCNN = 160
-    """net = FSei(
-        hidden_dim=hidden_dim,
-        embed_dim=embed_dim,
-        kernel_size=kernel_size,
-        n_genomic_features=n_genomic_features,
-        FCNN=FCNN,
-    )"""
     net = FSei(
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
@@ -507,7 +500,7 @@ class FDNABert(nn.Module):
             input_ids=input_ids,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,
-        )[0]
+        )[0].transpose(1, 2)
         output = self.classifier(embeddings)
         return output
 
@@ -517,9 +510,9 @@ def build_FDNABert(
     freeze_weights: bool,
     model_path: Optional[str] = None,
 ):
-    hidden_dim = 150
-    embed_dim = 520
-    kernel_size = 16
+    hidden_dim = 768
+    embed_dim = 960
+    kernel_size = 5
     net = FDNABert(
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
