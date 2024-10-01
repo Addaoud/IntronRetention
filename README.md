@@ -3,7 +3,7 @@
 <img src="https://github.com/Addaoud/IntronRetention/blob/main/model.PNG" width="640">
 
 ## Introduction
-This repository is a companion page for a research paper submitted to the 18th Machine Learning in Computational Biology conference [MLCB-2023](https://sites.google.com/cs.washington.edu/mlcb2023/). It provides code and experiments to demonstrate the value of foundation models of chromatin state for accurate prediction of human introns that are subject to intron retention (IR). We used two approaches for leveraging the [Sei](https://github.com/FunctionLab/sei-framework) architecture for predicting retained introns: The Fine-tuned Sei version uses the representation learned by the Sei convolutional layers, adding a convolutional block plus pooling and fully connected and output layers. Alternatively, the Sei-outputs version uses the chromatin targets learned by Sei (transcription factor binding, histone modifications, and chromatin accessibility) and uses these as input to a logistic regression or light-GBM classifier. Furthermore, this repository uses a novel approach to score the relevance of each transcription factor in the Jaspar Database in intron retention, using Integrated Gradients (IG). The original data was obtained from [here](https://github.com/fahadahaf/chromir).
+This repository is a companion page for a research paper submitted to Biorxiv (https://www.biorxiv.org/content/10.1101/2024.01.26.577402v2.full). It provides code and experiments to demonstrate the value of foundation models of chromatin state for accurate prediction of human introns that are subject to intron retention (IR).
 
 ## Manuscript
 Ahmed Daoud, and Asa Ben-Hur. "The role of chromatin state in intron retention: a case study in leveraging large scale deep learning models." bioRxiv (2024): 2024-01. [https://www.biorxiv.org/content/10.1101/2024.01.26.577402v2.full](https://www.biorxiv.org/content/10.1101/2024.01.26.577402v2.full)
@@ -26,12 +26,12 @@ conda install -r requirements.txt
 ```bash
 pip install lightgbm --config-settings=cmake.define.USE_GPU=ON
 ```
-If you don't intend to run LightGBM on gpu, you can install the cpu-version using pip and modify the device in the LGBM.py script to "cpu".
+If you don't intend to run LightGBM on a gpu, you can install the cpu-version using pip and modify the device in the LGBM.py script to "cpu".
 
 ## Datasets
-The file [data/final_data.csv](https://github.com/Addaoud/IntronRetention/blob/main/data/final_data.csv) contains the final and curated data that was used to produce all the results reported in the paper. 
+The file [data/final_data.csv](https://github.com/Addaoud/IntronRetention/blob/main/data/final_data.csv) contains the data that was used to produce all the results reported in the paper. 
 
-If you want to run the Logistic Regression or LightGBM models, you need to process the data to numpy files, using [Preprocess_data_to_numpy.py](https://github.com/Addaoud/IntronRetention/blob/main/Preprocess_data_to_numpy.py). It can be used to map the DNA sequences to Sei targets, and save the results in numpy files. This data can be used subsequently as input to the Logistic Regression or LightGBM models. You can use the following command line:
+If you want to run the Logistic Regression or LightGBM models, you need to process the data to numpy files, using [Preprocess_data_to_numpy.py](https://github.com/Addaoud/IntronRetention/blob/main/Preprocess_data_to_numpy.py). It is used to apply Sei to the DNA sequences, and save the targets in numpy files. This data can be used subsequently as input to the Logistic Regression or LightGBM models. You can use the following command line:
 ```bash
 python3 Preprocess_data_to_numpy.py --data "data" --result "data/numpy"
 ```
