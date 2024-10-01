@@ -31,24 +31,20 @@ If you don't intend to run LightGBM on a gpu, you can install the cpu-version us
 ## Datasets
 The file [data/final_data.csv](https://github.com/Addaoud/IntronRetention/blob/main/data/final_data.csv) contains the data that was used to produce all the results reported in the paper. 
 
-If you want to run the Logistic Regression or LightGBM models, you need to process the data to numpy files, using [Preprocess_data_to_numpy.py](https://github.com/Addaoud/IntronRetention/blob/main/Preprocess_data_to_numpy.py). It is used to apply Sei to the DNA sequences, and save the targets in numpy files. This data can be used subsequently as input to the Logistic Regression or LightGBM models. You can use the following command line:
-```bash
-python3 Preprocess_data_to_numpy.py --data "data" --result "data/numpy"
-```
-
 ## Getting started
-You can follow the following sections to reproduce the results.
-
-#### FSEI
-  * Refer to the [Sei repository](https://github.com/FunctionLab/sei-framework) to download the pre-trained [Sei framework](https://zenodo.org/records/4906997) and the [target.names](https://github.com/FunctionLab/sei-framework/blob/main/model/target.names) file. Please put both files in the main directory. You can simply use the following commands:
+Refer to the [Sei repository](https://github.com/FunctionLab/sei-framework) to download the pre-trained [Sei framework](https://zenodo.org/records/4906997) and the [target.names](https://github.com/FunctionLab/sei-framework/blob/main/model/target.names) file. Please put both files in the main directory. You can simply use the following commands:
 ```bash
 cd IntronRetention
 wget https://zenodo.org/records/4906997/files/sei_model.tar.gz?download=1 .
 tar -xvzf sei_model.tar.gz 
 wget https://raw.githubusercontent.com/FunctionLab/sei-framework/main/model/target.names .
 ```
+
+Follow the next sections to reproduce the results.
+
+#### FSEI
   * Refer to "json/FSei.json", to update paths and hyperparameters if necessary.
-  * You can follow the usage guide to train and evaluate the Fine-tuned Sei. You can either build a new model (the first python command line) or loading an existing one (the second python command line):
+  * You can follow the usage guide to train and evaluate the Fine-tuned Sei. You can either build a new model (the first python command line) or load an existing one (the second python command line):
 ```bash
 usage: FSei.py [-h] [--json JSON] [-n] [-m MODEL] [-p] [-f] [-t] [-e]
 
@@ -66,10 +62,10 @@ options:
   -e, --evaluate        Use this option to evaluate the model
 
 python3 FSei.py --json "json/FSei.json" -n -p -t -e
-python3 FSei.py --json "json/FSei.json" -m "existing_model_path" -t -e
+python3 FSei.py --json "json/FSei.json" -m "FSei_model_path" -t -e
 ```
   
-  * If you want to get the Integrated Grandient results using FSei model, you can run the attribution script using the following command line:
+  * To obtain the Integrated Grandients using the FSei model, run the attribution script using the python command line:
 ```bash
 usage: Attribute.py [-h] [-i] [-b] [-w WINDOW] [-t THRESHOLD] [-p PREDICTION] [-d DATABASE] [-m MODEL_PATH]
 
@@ -90,13 +86,13 @@ options:
   -m MODEL_PATH, --model_path MODEL_PATH
                         FSei model path
 
-python3 Attribute.py -m "existing_model_path" -i -b
+python3 Attribute.py -m "FSei_model_path" -i -b
 ```
-Results are saved in "IG" under the model directory path.
+Results are saved in a subdirectory "IG" under the model directory path.
 
 #### Basenji-like, AttentionConv, Basset-like model
   * Refer to "json/Bassenji.json", "json/AttentionConv.json" , or "json/Basset.json" to update paths and hyperparameters if necessary.
-  * You can train, from scratch, the Bassenji-like, AttentionConv, or Basset-like models using respectively the following command lines:
+  * You can train from scratch, the Bassenji-like, AttentionConv, or Basset-like models using respectively the following command lines:
 ```bash
 python3 Basenji.py --json "json/Basenji.json" -n -t -e
 python3 AttnConv.py --json "json/AttentionConv.json" -n -t -e
@@ -111,13 +107,17 @@ python3 DNABert.py --json "json/DNABert.json" -n -t -e
 ```
 
 #### Logistic Regression and LightGBM
+  *If you want to run the Logistic Regression or LightGBM models, you need to process the data to numpy files, using [Preprocess_data_to_numpy.py](https://github.com/Addaoud/IntronRetention/blob/main/Preprocess_data_to_numpy.py). It is used to apply Sei to the DNA sequences, and save the targets in numpy files. The files are used subsequently as input to the Logistic Regression or LightGBM models. Use the following command line:
+```bash
+python3 Preprocess_data_to_numpy.py --data "data" --result "data/numpy"
+``` 
   * Refer to "json/LR.json" or "json/LGBM.json" to update paths and hyperparameters if necessary.
   * You can train the Logistic Regression using the following command lines to build a new model or load an existing one:
 ```bash
 python3 LR.py --json "json/LR.json" -n -t -e
 python3 LR.py --json "json/LR.json" -m "existing_model_path" -t -e
 ```
-  * You can optimize and train the LGBM model using the following command lines to build a new model:
+  * You can optimize and train the LGBM model using the following command line to build a new model:
 ```bash
 python3 LGBM.py --json "json/LGBM.json" --optimize
 ```
