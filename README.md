@@ -15,7 +15,7 @@ git clone https://github.com/Addaoud/IntronRetention.git
 ```
 
 ## Dependencies
-1) You can create a python virtual environment (>=3.10) and install the dependencies using pip:
+1) You can create a python virtual environment (>=3.11) and install the dependencies using pip:
 ```bash
 pip install -r requirements.txt
 ```
@@ -46,7 +46,7 @@ Follow the next sections to reproduce the results.
   * Refer to "json/FSei.json", to update paths and hyperparameters if necessary.
   * Follow the usage guide to train and evaluate the Fine-tuned Sei. You can run python command line.
 ```bash
-usage: FSei.py [-h] [--json JSON] [-n] [-m MODEL] [-p] [-f] [-t] [-e]
+usage: FSei.py [-h] [--json JSON] [-n] [-m MODEL] [-p] [-f] [-b] [-t] [-e]
 
 Train and evaluate the FSei model
 
@@ -58,6 +58,7 @@ options:
                         Use this option to load an existing FSei model from model_path
   -p, --pretrain        Use this option to load Sei pretrained weights
   -f, --freeze          Use this option to freeze Sei pretrained weights. This option should be used with -p
+  -b, --block           Use this option to build the FSei model with a custom fine-tuning block.
   -t, --train           Use this option to train the model
   -e, --evaluate        Use this option to evaluate the model
 
@@ -100,11 +101,15 @@ python3 AttnConv.py --json "json/AttentionConv.json" -n -t -e
 python3 Basset.py --json "json/Basset.json" -n -t -e
 ```
 
-#### DNABert2
+#### DNABert-2
   * Refer to "json/DNABert.json", to update paths and hyperparameters if necessary.
-  * You can finetune the DNABert-2 model using the following command line:
+  * You can finetune the DNABERT-2 model using the following command line:
 ```bash
 python3 DNABert.py --json "json/DNABert.json" -n -t -e
+```
+  * If you want to run DNABERT-2*, you can use the following command line:
+```bash
+python3 FDNABert.py --json "json/DNABert.json" -n -t -e
 ```
 
 #### Logistic Regression and LightGBM

@@ -94,12 +94,14 @@ def main():
     IG_loader_Non_IR, IG_loader_IR, back_freq, DNAalphabet = get_IGdata()
 
     max_motif_scores = dict()
+    # pseudo_motifs = dict()
     log_odd_motifs = dict()
     for tf in motifs.keys():
+        # pseudo_motifs[tf] = np.where(motifs[tf] == 0, 10**-20, motifs[tf])
         pseudo_motif = np.where(motifs[tf] == 0, 10**-20, motifs[tf])
         log_odd_motifs[tf] = np.log(np.divide(pseudo_motif, back_freq))
     for tf in motifs.keys():
-        max_motif_scores[tf] = np.sum(np.max(motifs[tf]), axis=0)
+        max_motif_scores[tf] = np.sum(np.max(log_odd_motifs[tf], axis=0))
 
     if args.integrate:
         device = get_device()

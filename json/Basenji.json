@@ -1,6 +1,6 @@
 {
     "data_path": "data",
-    "results_path": "results/results_ConvNet",
+    "results_path": "results/results_Basenji",
     "optimizer_type": "adamw",
     "weight_decay": 0.01,
     "momentum": 0.95,

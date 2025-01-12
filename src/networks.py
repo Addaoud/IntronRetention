@@ -299,6 +299,7 @@ class FSei(nn.Module):
         kernel_size: int,
         n_genomic_features: Optional[int] = 2,
         FCNN: Optional[int] = 160,
+        use_finetune_block: Optional[bool] = False,
     ):
         """
         Parameters
@@ -315,6 +316,7 @@ class FSei(nn.Module):
         self.embed_dim = embed_dim
         self.kernel_size = kernel_size
         self.n_genomic_features = n_genomic_features
+        self.use_finetune_block = use_finetune_block
         self.max = nn.MaxPool1d(kernel_size=4, stride=4)
         self.lconv1 = nn.Sequential(
             nn.Conv1d(4, 3 * self.FCNN, kernel_size=9, padding=4),
@@ -390,17 +392,19 @@ class FSei(nn.Module):
         self.spline_tr = nn.Sequential(
             BSplineTransformation(self._spline_df, scaled=False)
         )
-        self.classifier = finetuneblock(
-            hidden_dim=self.hidden_dim,
-            embed_dim=self.embed_dim,
-            kernel_size=self.kernel_size,
-            output_dim=self.n_genomic_features,
-        )
-        """self.classifier = nn.Sequential(
-            nn.Linear(960 * self._spline_df, self.hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.hidden_dim, n_genomic_features),
-        )"""
+        if self.use_finetune_block:
+            self.classifier = finetuneblock(
+                hidden_dim=self.hidden_dim,
+                embed_dim=self.embed_dim,
+                kernel_size=self.kernel_size,
+                output_dim=self.n_genomic_features,
+            )
+        else:
+            self.classifier = nn.Sequential(
+                nn.Linear(960 * self._spline_df, self.hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.hidden_dim, n_genomic_features),
+            )
 
     def forward(self, input: torch.Tensor):
         """
@@ -423,9 +427,12 @@ class FSei(nn.Module):
         dconv_out5 = self.dconv5(cat_out4)
         out = cat_out4 + dconv_out5
         spline_out = self.spline_tr(out)
-        output = self.classifier(spline_out)
-        # reshape_out = spline_out.view(spline_out.size(0), 960 * self._spline_df)
-        # output = self.classifier(reshape_out)
+        if self.use_finetune_block:
+            output = self.classifier(spline_out)
+        else:
+            output = self.classifier(
+                spline_out.view(spline_out.size(0), 960 * self._spline_df)
+            )
         return output
 
 
@@ -434,6 +441,7 @@ def build_FSei(
     use_pretrain: Optional[bool] = False,
     freeze_weights: Optional[bool] = False,
     model_path: Optional[str] = None,
+    use_finetune_block: Optional[bool] = False,
 ):
     hidden_dim = 960
     embed_dim = 520
@@ -446,6 +454,7 @@ def build_FSei(
         kernel_size=kernel_size,
         n_genomic_features=n_genomic_features,
         FCNN=FCNN,
+        use_finetune_block=use_finetune_block,
     )
     if not new_model and model_path != None:
         print("Loading model state")

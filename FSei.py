@@ -50,6 +50,12 @@ def parse_arguments(parser):
         help="Use this option to freeze Sei pretrained weights. This option should be used with -p",
     )
     parser.add_argument(
+        "-b",
+        "--block",
+        action="store_true",
+        help="Use this option to build the FSei model with a custom fine-tuning block.",
+    )
+    parser.add_argument(
         "-t",
         "--train",
         action="store_true",
@@ -104,6 +110,7 @@ if __name__ == "__main__":
         use_pretrain=args.pretrain,
         freeze_weights=args.freeze,
         model_path=args.model,
+        use_finetune_block=args.block,
     ).to(device)
 
     # prepare the optimizer
